@@ -14,14 +14,24 @@ Q = diag([10,10,10,.1,.1,.1,1]);
 R = diag([.1, .1, .1, .1]);
 
 vis = Visualize6DoF(dt);
-n = 0;
+
+waypts = [0 0 0; 1 2 3; 4 2 3; 4 4 4]';
+v0 = zeros(3,1);
+a0 = zeros(3,1);
+v1 = zeros(3,1);
+z1 = zeros(3,1);
+[xx, yy, zz, vxx, vyy, vzz] = constructMinimumSnapTraj(dt,waypts,v0,a0,v1,a1);
+psi = atan2(yy,xx);
+ref_traj = [xx;yy;zz;vxx;vyy;vzz;psi];
+vis.setReferenceTraj(ref_traj);
 
 x = [0 0 0 0 0 0 0]';
-x_ref = [3 5 8 0 0 0 pi]';
+%x_ref = [3 5 8 0 0 0 pi]';
 k = lqr(A, B, Q, R);
-for i = 1:dt:10
+for n = 1:size(ref_traj,2)
     tic
-    n = n + 1;
+    
+    x_ref = ref_traj(:,n);
     
     u = -k*(x - x_ref) + G_ff;
     x = x + dt*(A*x + B*u + G);

@@ -26,6 +26,7 @@ classdef Visualize6DoF < handle
         fig;
         view_azimuth          % azimuth for the view angle
         freq;
+        ref_traj;
     end
     
     methods
@@ -38,8 +39,13 @@ classdef Visualize6DoF < handle
             obj.referenceState = zeros(12,1);
             obj.robotState = zeros(12,1);
             obj.robotStates = zeros(12,0);
+            obj.ref_traj = zeros(3,0);
             obj.view_azimuth = obj.view_azimuth_init;
             set(gcf, 'Units', 'Normalized', 'OuterPosition', [0.25 0.1 0.5 0.8]);
+        end
+        
+        function [] = setReferenceTraj(obj,p)
+            obj.ref_traj = p;
         end
         
         function [] = setReferenceState(obj,p,R,n)
@@ -108,6 +114,8 @@ classdef Visualize6DoF < handle
             xlabel('x')
             ylabel('y')
             zlabel('z')
+            
+            plot3(obj.ref_traj(1,:),obj.ref_traj(2,:),obj.ref_traj(3,:), 'color', 'c')
             
             set(0, 'CurrentFigure', oldfig)
         end
