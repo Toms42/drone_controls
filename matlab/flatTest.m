@@ -21,17 +21,17 @@ a0 = zeros(3,1);
 v1 = zeros(3,1);
 z1 = zeros(3,1);
 [xx, yy, zz, vxx, vyy, vzz] = constructMinimumSnapTraj(dt,waypts,v0,a0,v1,a1);
-psi = atan2(yy,xx);
+psi = atan2(vyy,vxx);
 ref_traj = [xx;yy;zz;vxx;vyy;vzz;psi];
 vis.setReferenceTraj(ref_traj);
 
 x = [0 0 0 0 0 0 0]';
 %x_ref = [3 5 8 0 0 0 pi]';
 k = lqr(A, B, Q, R);
-for n = 1:size(ref_traj,2)
+for n = 1:size(ref_traj,2)+1/dt
     tic
     
-    x_ref = ref_traj(:,n);
+    x_ref = ref_traj(:,min(n,size(ref_traj,2)));
     
     u = -k*(x - x_ref) + G_ff;
     x = x + dt*(A*x + B*u + G);
