@@ -14,21 +14,22 @@ G = [0 0 0 0 0 -1 0]' * g;
 Q = diag([10,10,10,.1,.1,.1,1]);
 R = diag([.1, .1, .1, .1]);
 
-vis = Visualize6DoF(dt);
 
 waypts = [0 0 0; 1 2 3; 4 2 3; 4 4 4]';
 v0 = zeros(3,1);
 a0 = zeros(3,1);
 v1 = zeros(3,1);
 z1 = zeros(3,1);
-[xx, yy, zz, vxx, vyy, vzz, axx, ayy, azz] = constructMinimumSnapTraj(dt,waypts,v0,a0,v1,a1);
+[xx, yy, zz, vxx, vyy, vzz, axx, ayy, azz] = constructMinimumSnapTraj(dt,3,waypts,v0,a0,v1,a1);
 psi = atan2(vyy,vxx);
+psi(end) = psi(end-1);
 ref_traj = [xx;yy;zz;vxx;vyy;vzz;psi];
 feedforward = [axx; ayy; azz + ones(size(axx)) * g; zeros(size(axx))];
+
+vis = Visualize6DoF(dt);
 vis.setReferenceTraj(ref_traj);
 
 x = [0 0 0 0 0 0 0]';
-%x_ref = [3 5 8 0 0 0 pi]';
 k = lqr(A, B, Q, R);
 for n = 1:size(ref_traj,2)+1/dt
     tic

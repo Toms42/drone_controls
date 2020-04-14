@@ -1,10 +1,9 @@
-function [xx,yy,zz,vxx,vyy,vzz,axx,ayy,azz,jxx,jyy,jzz] = constructMinimumSnapTraj(dt,waypts,v0,a0,v1,a1)
+function [xx,yy,zz,vxx,vyy,vzz,axx,ayy,azz,jxx,jyy,jzz] = constructMinimumSnapTraj(dt,T,waypts,v0,a0,v1,a1)
 %CONSTRUCTMINIMUMSNAPTRAJ Summary of this function goes here
 %   Detailed explanation goes herefunction demo1_minimum_snap_simple()
 % maoshuyuan123@gmail.com
 
     % condition
-    T = 5;
     ts = arrangeT(waypts,T);
     n_order = 5;
     
