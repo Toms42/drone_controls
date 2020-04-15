@@ -11,11 +11,13 @@ classdef Visualize6DoF < handle
         
         view_azimuth_init = 45 + 90;
         view_rot_speed = 10;             % degrees per second
-        view_elevation = 60;              % camera elevation
+        view_elevation = 30;              % camera elevation
         view_width = 3.0;                   % width of the workspace
         view_center = [0, 0, 0];        % center of the view frame
-        center_around_robot = false;    % If you turn this on, the graph will be centered around the robot.
-        center_around_ref_traj = true;   % If you turn this on, the graph will be centered around the reference.
+        center_around_robot = true;    % If you turn this on, the graph will be centered around the robot.
+        center_around_ref_traj = false;   % If you turn this on, the graph will be centered around the reference.
+        align_yaw_with_robot = false;
+        align_yaw_with_robot_offset = pi/2;
     end
     properties
         dt;
@@ -112,7 +114,12 @@ classdef Visualize6DoF < handle
             xlim([zx - obj.view_width/2, zx + obj.view_width/2]) 
             ylim([zy - obj.view_width/2, zy + obj.view_width/2]) 
             zlim([zz - obj.view_width/2, zz + obj.view_width/2])
-            obj.view_azimuth = mod(obj.view_azimuth + obj.view_rot_speed * obj.dt, 360);
+            if obj.align_yaw_with_robot
+                ypr = rotm2eul(reshape(obj.robotState(4:12),[3,3]), 'zyx') - obj.align_yaw_with_robot_offset;
+                obj.view_azimuth = rad2deg(ypr(1));
+            else
+                obj.view_azimuth = mod(obj.view_azimuth + obj.view_rot_speed * obj.dt, 360);
+            end
             view(obj.view_azimuth, obj.view_elevation)
             xlabel('x')
             ylabel('y')
