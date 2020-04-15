@@ -10,9 +10,9 @@ classdef Visualize6DoF < handle
         trace_time = 30;
         
         view_azimuth_init = 45 + 90;
-        view_rot_speed = 0;             % degrees per second
-        view_elevation = 90;              % camera elevation
-        view_width = 6.0;                   % width of the workspace
+        view_rot_speed = 10;             % degrees per second
+        view_elevation = 60;              % camera elevation
+        view_width = 3.0;                   % width of the workspace
         view_center = [0, 0, 0];        % center of the view frame
         center_around_robot = false;    % If you turn this on, the graph will be centered around the robot.
         center_around_ref_traj = true;   % If you turn this on, the graph will be centered around the reference.
