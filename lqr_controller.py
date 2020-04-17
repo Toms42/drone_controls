@@ -69,12 +69,12 @@ for i in range(1,N):
     ff = 0
     x = np.reshape(x_traj[:,i-1], newshape=(FLAT_STATES, 1))
     u = -K*(x-xref) + ff + Gff
-    x = x + dt*(A@x + B@u + G)
+    x = x + dt*(A.dot(x) + B.dot(u) + G)
 
     [Td, phid, thetad, psid] = inverse_dyn(x, u, m)
     x_traj[:,i] = np.reshape(x, newshape=(FLAT_STATES,))
 
-    target_rot = Rotation.from_euler(seq="ZYX", angles=[psid, thetad, phid])
+    target_rot = Rotation.from_euler(seq="ZYX", angles=[psid, thetad, phid]).as_dcm()
 
     # Pid to estimate torque moments
 
