@@ -3,14 +3,35 @@ import control
 from scipy.spatial.transform import Rotation
 from simple_pid import PID
 from collections import namedtuple
-
 import matplotlib.pyplot as plt
+import time
+
+import roslib
+import rospy
+import tf
+from mav_msgs.msg import RateThrust
+from std_msgs.msg import Empty
+from sensor_msgs.msg import Imu
 
 import python_optimal_splines.OptimalSplineGen as OptimalSplineGen
 from inverseDyn import inverse_dyn
 
+imu_data = None
+def imu_cb(data):
+    imu_data = data
+
+# init rosnodes
+rospy.init_node('lqr_controller')
+tf_listener = tf.TransformListener()
+imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_data, queue_size=1)
+start_sim_pub = rospy.Publisher('/uav/input/arm', Empty, queue_size=1)
+ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
+
 # Global Constants
-m = 5  # kg
+Ixx = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_xx")
+Iyy = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_yy")
+Izz = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_zz")
+m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
 g = 9.81
 SPLINE_ORDER = 5  # to minimize snap(5th order)
 
@@ -43,48 +64,72 @@ for pt in pts:
 
 # Controls Calculation
 dt = 0.01
+rate = rospy.Rate(int(1./dt))
 # N = len(pts) // dt
 T = 10  # seconds
 N = int((T+dt) // dt)  # num samples
 
-# PID Controller for setting torques
-pidX = PID(Kp=1, Ki=0.1, Kd=0.05)
-pidY = PID(Kp=1, Ki=0.1, Kd=0.05)
-pidZ = PID(Kp=1, Ki=0.1, Kd=0.05)
+# PID Controller for setting angular rates
+pid_phi = PID(Kp=1, Ki=0.1, Kd=0.05, setpoint=0)
+pid_theta = PID(Kp=1, Ki=0.1, Kd=0.05, setpoint=0)
 
 # Optimal control law for flat system
 K, S, E = control.lqr(A, B, Q, R)
 
-x0 = np.zeros((FLAT_STATES, ))
-x_traj = np.zeros((FLAT_STATES, N))
-# get flightgoggles' odometry to get new state
-# velocity given in body frame, need to change to world frame
-x_traj[:, 0] = x0
+# plotting
+time_axis = []
+start_time = time.time()
+
+# start simulation
+trans, rot = [0, 0, 0], [0, 0, 0, 1]
+x = np.zeros((FLAT_STATES, 1))
 xref = np.array([[3, 5, 8, 0, 0, 0, 0]]).T
-for i in range(1,N):
-    t = i*dt
-    # TODO: order = 0 for x, y, z...
-    # xref = traj.val(order=0, t=t)
-    # ff = traj.val(order=2, t=t)  # feedfwd accel
+while not rospy.is_shutdown():
+    start_sim_pub.publish(Empty())
+    try:
+        (trans, rot) = tf_listener.lookupTransform('uav/imu', 'world/ned', rospy.Time(0))
+    except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
+        continue
+    cur_time = time.time()
+
+    # calculate linear velocities, define new state
+    lin_vel = (np.array(trans) - x[:3,0]) / dt
+    x[:3,0] = trans  # new position
+    x[3:6,0] = lin_vel  # new linear velocity
+    [phi, theta, psi] = tf.transformations.euler_from_quaternion(rot, axes='sxyz')
+    x[6] = psi
+
+    # get lin acceleration data from IMU
+    # ff = imu_data.
     ff = 0
-    x = np.reshape(x_traj[:,i-1], newshape=(FLAT_STATES, 1))
     u = -K*(x-xref) + ff + Gff
-    x = x + dt*(A.dot(x) + B.dot(u) + G)
+    [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
 
-    [Td, phid, thetad, psid] = inverse_dyn(x, u, m)
-    x_traj[:,i] = np.reshape(x, newshape=(FLAT_STATES,))
+    # generate desired roll, pitch rates, minimize error btwn desired and current
+    dphi = pid_phi(phid - phi)
+    dtheta = pid_theta(thetad - theta)
+    dpsi = u[3]
 
-    target_rot = Rotation.from_euler(seq="ZYX", angles=[psid, thetad, phid]).as_dcm()
+    # convert rotation quaternion to euler angles and rotation matrix
+    
+    # rpy rates around around body axis
+    new_ctrl = RateThrust()
+    new_ctrl.angular_rates.x = dphi
+    new_ctrl.angular_rates.y = dtheta
+    new_ctrl.angular_rates.z = dpsi
+    new_ctrl.thrust.z = thrustd
+    ctrl_pub.publish(new_ctrl)
 
-    # Pid to estimate torque moments
+    # Plot results
+    # time_axis.append(cur_time - start_time)
+    # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
+    # time_axis = np.arange(0, T, dt)
+    # ax1.plot(time_axis, x_traj[0,:])
+    # ax1.set_title('X v.s time')
+    # ax2.plot(time_axis, x_traj[1,:])
+    # ax2.set_title('Y v.s time')
+    # ax3.plot(time_axis, x_traj[2,:])
+    # ax3.set_title('Z v.s time')
+    # plt.show()
 
-# Plot results
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-time_axis = np.arange(0, T, dt)
-ax1.plot(time_axis, x_traj[0,:])
-ax1.set_title('X v.s time')
-ax2.plot(time_axis, x_traj[1,:])
-ax2.set_title('Y v.s time')
-ax3.plot(time_axis, x_traj[2,:])
-ax3.set_title('Z v.s time')
-plt.show()
+    rate.sleep()
