@@ -42,10 +42,9 @@ A = np.zeros((FLAT_STATES, FLAT_STATES))
 A[0:3,3:6] = np.eye(3)
 B = np.zeros((FLAT_STATES, FLAT_CTRLS))
 B[3:,:] = np.eye(4)
-G = np.array([[0, 0, 0, 0, 0, -1, 0]]).T * g
 Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
 Q = np.diag([10, 10, 10, 0.1, 0.1, 0.1, 1])
-R = np.eye(FLAT_CTRLS) * 0.1
+R = np.eye(FLAT_CTRLS)
 
 # Trajectory generation
 wpts = []
@@ -70,8 +69,8 @@ T = 10  # seconds
 N = int((T+dt) // dt)  # num samples
 
 # PID Controller for setting angular rates
-pid_phi = PID(Kp=1, Ki=0.1, Kd=0.05, setpoint=0)
-pid_theta = PID(Kp=1, Ki=0.1, Kd=0.05, setpoint=0)
+pid_phi = PID(Kp=2, Ki=0, Kd=2, setpoint=0)
+pid_theta = PID(Kp=2, Ki=0, Kd=2, setpoint=0)
 
 # Optimal control law for flat system
 K, S, E = control.lqr(A, B, Q, R)
@@ -83,32 +82,35 @@ start_time = time.time()
 # start simulation
 trans, rot = [0, 0, 0], [0, 0, 0, 1]
 x = np.zeros((FLAT_STATES, 1))
-xref = np.array([[3, 5, 8, 0, 0, 0, 0]]).T
+xref = np.array([[1, 0, 1, 0, 0, 0, 0]]).T
 while not rospy.is_shutdown():
     start_sim_pub.publish(Empty())
     try:
-        (trans, rot) = tf_listener.lookupTransform('uav/imu', 'world/ned', rospy.Time(0))
+        (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
     except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
         continue
     cur_time = time.time()
+    # print(trans)
 
     # calculate linear velocities, define new state
     lin_vel = (np.array(trans) - x[:3,0]) / dt
     x[:3,0] = trans  # new position
     x[3:6,0] = lin_vel  # new linear velocity
-    [phi, theta, psi] = tf.transformations.euler_from_quaternion(rot, axes='sxyz')
+    # print(lin_vel)
+    [psi, theta, phi] = Rotation.from_quat(rot).as_euler("ZYX")
     x[6] = psi
 
-    # get lin acceleration data from IMU
-    # ff = imu_data.
-    ff = 0
-    u = -K*(x-xref) + ff + Gff
+    u = -K*(x-xref) + Gff
+    # ideal_x = x
     [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
+    # print(u[2], thrustd)
+    # print(xref[2], x[2], u[2])
 
     # generate desired roll, pitch rates, minimize error btwn desired and current
-    dphi = pid_phi(phid - phi)
-    dtheta = pid_theta(thetad - theta)
+    dphi = pid_phi(phi - phid)
+    dtheta = pid_theta(theta - thetad)
     dpsi = u[3]
+    # print("ang rates:")
 
     # convert rotation quaternion to euler angles and rotation matrix
     
