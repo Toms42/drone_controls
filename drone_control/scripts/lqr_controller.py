@@ -14,8 +14,9 @@ import tf
 from mav_msgs.msg import RateThrust
 from std_msgs.msg import Empty
 from sensor_msgs.msg import Imu
+from nav_msgs.msg import Path
 
-import python_optimal_splines.DroneTrajectory as DroneTrajectory
+from python_optimal_splines.DroneTrajectory import DroneTrajectory
 from inverseDyn import inverse_dyn
 
 imu_data = None
@@ -34,16 +35,18 @@ def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
                 (trans, rot) = tf_listener.lookupTransform(ref_frame, 'gate%d' % gate_id, rospy.Time(0))
                 gate_transforms[gate_id] = (trans, rot)
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-                print("Gate %d transform not found... waiting" % gate_id)
                 temp_gates.append(gate_id)
                 continue
         
+        print("Missing the following gates: ", temp_gates)
         gate_ids = temp_gates
         attempts -= 1
         time.sleep(delay)
     
     return gate_transforms
 
+# rosparams
+aggr = 0.1
 
 # init rosnodes
 rospy.init_node('lqr_controller')
@@ -52,6 +55,7 @@ imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_data, queue_siz
 start_sim_pub = rospy.Publisher('/uav/input/arm', Empty, queue_size=1)
 end_sim_pub = rospy.Publisher('/uav/input/reset', Empty, queue_size=1)
 ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
+path_pub = rospy.Publisher('ref_traj', Path, queue_size=1)
 
 # Global Constants
 Ixx = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_xx")
@@ -59,7 +63,6 @@ Iyy = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_yy")
 Izz = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_zz")
 m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
 g = 9.81
-SPLINE_ORDER = 5  # to minimize snap(5th order)
 
 # Flat Dynamics
 FLAT_STATES = 7
@@ -73,78 +76,83 @@ Q = np.diag([10, 10, 10, 0.1, 0.1, 0.1, 1])
 R = np.eye(FLAT_CTRLS) * 10
 
 # Trajectory generation
-num_gates = 23
+# get gate poses
+num_gates = 3
 gate_ids = list(range(1, num_gates+1))
 gate_transforms = get_gate_positions(gate_ids)
-drone_traj = DroneTrajectory()
-wpts = []
-pts = []  # FILL IN
-v0 = np.zeros((3,1))
-a0 = np.zeros((3,1))
-vg = np.zeros((3,1))
-ag = np.zeros((3,1))
-for pt in pts:
-    (x, y, z, t) = pt
-    wp = OptimalSplineGen.Waypoint(t)
-    wp.add_hard_constraint(0, x, y, z)
-    wpts.append(wp)
 
-# gate position and quaternion
-# traj = OptimalSplineGen.compute_min_derivative_spline(5, 3, 2, wpts)
-
-# Controls Calculation
+# inital drone pose and generated spline of waypoints
+print("Solving for optimal trajectory...")
 dt = 0.01
 rate = rospy.Rate(int(1./dt))
-# N = len(pts) // dt
-T = 10  # seconds
-N = int((T+dt) // dt)  # num samples
+x0 = np.zeros((FLAT_STATES, 1))
+drone_traj = DroneTrajectory()
+drone_traj.set_start(position=list(x0[:3]), velocity=list(x0[3:6]))
+for (trans, rot) in gate_transforms.values():
+    drone_traj.add_gate(trans, rot)
+drone_traj.solve(aggr)
 
 # PID Controller for setting angular rates
 pid_phi = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
 pid_theta = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
 
 # Optimal control law for flat system
+print("Solving linear feedback system...")
 K, S, E = control.lqr(A, B, Q, R)
 
+# Generate trajectory (starttime-sensitive)
+print("Generating optimal trajectory...")
+start_time = rospy.get_time()
+xref_traj = drone_traj.as_path(dt=dt, frame='reference', start_time=rospy.Time.now())
+
 # plotting
+N = len(xref_traj.poses)
 time_axis = []
-start_time = time.time()
-fig = plt.figure()
-roll_data, pitch_data = [], []
-rolld_data, pitchd_data = [], []
-roll_plot = fig.add_subplot(1, 2, 1)
-roll_plot.set_ylabel('Roll')
-pitch_plot = fig.add_subplot(1, 2, 2)
-pitch_plot.set_xlabel('Time (s)')
-pitch_plot.set_ylabel('Pitch')
-fig.suptitle('Target(red) v.s actual(green) roll and pitch')
+xref_traj_series = np.zeros((FLAT_STATES, N))
+x_traj_series = np.zeros((FLAT_STATES, N))
 
-# start simulation
-trans, rot = [0, 0, 0], [0, 0, 0, 1]
-x = np.zeros((FLAT_STATES, 1))
-
-# oscillating btwn two rolls
-target_i = 0
-theta_targets = [math.pi/4, -math.pi/4]
-thetad = theta_targets[target_i]
-phid = 0
-
-# oscillating between two positions
-targets = [
-    np.array([[2, 0, 1, 0, 0, 0, 0]]).T,
-    np.array([[-2, 0, 1, 0, 0, 0, 0]]).T
-]
-xref_i = 0
-xref = targets[xref_i]
-
+# run simulation
+print("Running simulation and executing controls...")
 iter = 0
-while iter < 14/dt and not rospy.is_shutdown():
+for pose in xref_traj.poses:
+    # publish arm command and ref traj
     start_sim_pub.publish(Empty())
+    path_pub.publish(xref_traj)
+
+    # get next target waypoint
+    t = rospy.get_time() - start_time
+    vx = drone_traj.val(t=t, order=1, dim=0)
+    vy = drone_traj.val(t=t, order=1, dim=1)
+    vz = drone_traj.val(t=t, order=1, dim=2)
+    target_ori = [
+        pose.pose.orientation.x,
+        pose.pose.orientation.y,
+        pose.pose.orientation.z,
+        pose.pose.orientation.w]
+    # TODO: Use these desired roll/pitch or the ones generated from fdbk law?
+    [psid, thetad, phid] = Rotation.from_quat(target_ori).as_euler('ZYX')
+    
+    xref = np.array([[
+        pose.pose.position.x,
+        pose.pose.position.y,
+        pose.pose.position.z,
+        vx,
+        vy,
+        vz,
+        psid]]).T
+    xref_traj_series[:, iter] = np.ndarray.flatten(xref)
+
+    # feedforward acceleration
+    ff = np.array([[
+        drone_traj.val(t=t, order=2, dim=0),
+        drone_traj.val(t=t, order=2, dim=1),
+        drone_traj.val(t=t, order=2, dim=2),
+        0]]).T
+    
     try:
         (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
     except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
         continue
-    cur_time = time.time()
 
     # calculate linear velocities, define new state
     lin_vel = (np.array(trans) - x[:3,0]) / dt
@@ -152,22 +160,14 @@ while iter < 14/dt and not rospy.is_shutdown():
     x[3:6,0] = lin_vel  # new linear velocity
     [psi, theta, phi] = Rotation.from_quat(rot).as_euler("ZYX")
     x[6] = psi
+    x_traj_series[:, iter] = np.ndarray.flatten(x)
 
-    u = -K*(x-xref) + Gff
-    # [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
-    [thrustd, _, _, psid] = inverse_dyn(x, u, m)
-
-    if iter % int(2.0/dt) == 0:
-        target_i = 1 - target_i
-        thetad = theta_targets[target_i]
-        # xref_i = 1 - xref_i
-        # xref = targets[xref_i]
-        # print("New target: (%d,%d,%d)" % (xref[0], xref[1], xref[2]))
+    u = -K*(x-xref) + ff + Gff
+    [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
 
     # generate desired roll, pitch rates, minimize error btwn desired and current
     dphi = pid_phi(phi - phid)
     dtheta = pid_theta(theta - thetad)
-    # print(dtheta)
     dpsi = u[3]
 
     # convert rotation quaternion to euler angles and rotation matrix
@@ -180,23 +180,32 @@ while iter < 14/dt and not rospy.is_shutdown():
     new_ctrl.thrust.z = thrustd
     ctrl_pub.publish(new_ctrl)
 
-    # oscillate btwn two points to get step responses of angles
-    error = np.linalg.norm((x-xref)[:3])
-
     # Plot results
-    time_axis.append(iter)
-    roll_data.append(phi)
-    rolld_data.append(phid)
-    pitch_data.append(theta)
-    pitchd_data.append(thetad)
-
+    time_axis.append(t)
     iter += 1
     rate.sleep()
 
 end_sim_pub.publish(Empty())
-roll_plot.scatter(time_axis, rolld_data, c = 'r')
-roll_plot.scatter(time_axis, roll_data, c = 'g')
 
-pitch_plot.scatter(time_axis, pitchd_data, c = 'r')
-pitch_plot.scatter(time_axis, pitch_data, c = 'g')
+
+# plot x, y, z, vx, vy, vz
+fig, axs = plt.subplots(3, 3)
+axs[0, 0].set_title('X')
+axs[0, 1].set_title('Y')
+axs[0, 2].set_title('Z')
+axs[1, 0].set_title('VX')
+axs[1, 1].set_title('VY')
+axs[1, 2].set_title('VZ')
+for ax in axs.flat:
+    ax.set(xlabel='Time(s)')
+fig.suptitle('Target(red) v.s actual(green) roll and pitch')
+for i in range(3):
+    # position
+    axs[0, i].scatter(time_axis, xref_traj_series[i,:], c = 'r')
+    axs[0, i].scatter(time_axis, x_traj_series[i,:], c = 'g')
+
+    # velocity
+    axs[1, i].scatter(time_axis, xref_traj_series[i+3,:], c = 'r')
+    axs[1, i].scatter(time_axis, x_traj_series[i+3,:], c = 'g')
+
 plt.show()

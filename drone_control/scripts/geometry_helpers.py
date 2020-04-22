@@ -71,4 +71,5 @@ def quat_from_vecs(v1, v2):
 
     quat = np.cross(v1, v2)  # xyz
     w = (v1_mag * v2_mag) + cos_theta
-    return np.append(quat, [w])
+    quat = np.append(quat, [w])
+    return quat / np.linalg.norm(quat)
