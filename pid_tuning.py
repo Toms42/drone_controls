@@ -1,4 +1,5 @@
 import numpy as np 
+import math
 import control
 from scipy.spatial.transform import Rotation
 from simple_pid import PID
@@ -25,6 +26,7 @@ rospy.init_node('lqr_controller')
 tf_listener = tf.TransformListener()
 imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_data, queue_size=1)
 start_sim_pub = rospy.Publisher('/uav/input/arm', Empty, queue_size=1)
+end_sim_pub = rospy.Publisher('/uav/input/reset', Empty, queue_size=1)
 ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
 
 # Global Constants
@@ -44,7 +46,7 @@ B = np.zeros((FLAT_STATES, FLAT_CTRLS))
 B[3:,:] = np.eye(4)
 Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
 Q = np.diag([10, 10, 10, 0.1, 0.1, 0.1, 1])
-R = np.eye(FLAT_CTRLS)
+R = np.eye(FLAT_CTRLS) * 10
 
 # Trajectory generation
 wpts = []
@@ -59,6 +61,7 @@ for pt in pts:
     wp.add_hard_constraint(0, x, y, z)
     wpts.append(wp)
 
+# gate position and quaternion
 # traj = OptimalSplineGen.compute_min_derivative_spline(5, 3, 2, wpts)
 
 # Controls Calculation
@@ -69,8 +72,8 @@ T = 10  # seconds
 N = int((T+dt) // dt)  # num samples
 
 # PID Controller for setting angular rates
-pid_phi = PID(Kp=2, Ki=0, Kd=2, setpoint=0)
-pid_theta = PID(Kp=2, Ki=0, Kd=2, setpoint=0)
+pid_phi = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
+pid_theta = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
 
 # Optimal control law for flat system
 K, S, E = control.lqr(A, B, Q, R)
@@ -78,39 +81,66 @@ K, S, E = control.lqr(A, B, Q, R)
 # plotting
 time_axis = []
 start_time = time.time()
+fig = plt.figure()
+roll_data, pitch_data = [], []
+rolld_data, pitchd_data = [], []
+roll_plot = fig.add_subplot(1, 2, 1)
+roll_plot.set_ylabel('Roll')
+pitch_plot = fig.add_subplot(1, 2, 2)
+pitch_plot.set_xlabel('Time (s)')
+pitch_plot.set_ylabel('Pitch')
+fig.suptitle('Target(red) v.s actual(green) roll and pitch')
 
 # start simulation
 trans, rot = [0, 0, 0], [0, 0, 0, 1]
 x = np.zeros((FLAT_STATES, 1))
-xref = np.array([[1, 0, 1, 0, 0, 0, 0]]).T
-while not rospy.is_shutdown():
+
+# oscillating btwn two rolls
+target_i = 0
+theta_targets = [math.pi/4, -math.pi/4]
+thetad = theta_targets[target_i]
+phid = 0
+
+# oscillating between two positions
+targets = [
+    np.array([[2, 0, 1, 0, 0, 0, 0]]).T,
+    np.array([[-2, 0, 1, 0, 0, 0, 0]]).T
+]
+xref_i = 0
+xref = targets[xref_i]
+
+iter = 0
+while iter < 14/dt and not rospy.is_shutdown():
     start_sim_pub.publish(Empty())
     try:
         (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
     except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
         continue
     cur_time = time.time()
-    # print(trans)
 
     # calculate linear velocities, define new state
     lin_vel = (np.array(trans) - x[:3,0]) / dt
     x[:3,0] = trans  # new position
     x[3:6,0] = lin_vel  # new linear velocity
-    # print(lin_vel)
     [psi, theta, phi] = Rotation.from_quat(rot).as_euler("ZYX")
     x[6] = psi
 
     u = -K*(x-xref) + Gff
-    # ideal_x = x
-    [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
-    # print(u[2], thrustd)
-    # print(xref[2], x[2], u[2])
+    # [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
+    [thrustd, _, _, psid] = inverse_dyn(x, u, m)
+
+    if iter % int(2.0/dt) == 0:
+        target_i = 1 - target_i
+        thetad = theta_targets[target_i]
+        # xref_i = 1 - xref_i
+        # xref = targets[xref_i]
+        # print("New target: (%d,%d,%d)" % (xref[0], xref[1], xref[2]))
 
     # generate desired roll, pitch rates, minimize error btwn desired and current
     dphi = pid_phi(phi - phid)
     dtheta = pid_theta(theta - thetad)
+    # print(dtheta)
     dpsi = u[3]
-    # print("ang rates:")
 
     # convert rotation quaternion to euler angles and rotation matrix
     
@@ -122,16 +152,23 @@ while not rospy.is_shutdown():
     new_ctrl.thrust.z = thrustd
     ctrl_pub.publish(new_ctrl)
 
-    # Plot results
-    # time_axis.append(cur_time - start_time)
-    # fig, (ax1, ax2, ax3) = plt.subplots(1, 3)
-    # time_axis = np.arange(0, T, dt)
-    # ax1.plot(time_axis, x_traj[0,:])
-    # ax1.set_title('X v.s time')
-    # ax2.plot(time_axis, x_traj[1,:])
-    # ax2.set_title('Y v.s time')
-    # ax3.plot(time_axis, x_traj[2,:])
-    # ax3.set_title('Z v.s time')
-    # plt.show()
+    # oscillate btwn two points to get step responses of angles
+    error = np.linalg.norm((x-xref)[:3])
 
+    # Plot results
+    time_axis.append(iter)
+    roll_data.append(phi)
+    rolld_data.append(phid)
+    pitch_data.append(theta)
+    pitchd_data.append(thetad)
+
+    iter += 1
     rate.sleep()
+
+end_sim_pub.publish(Empty())
+roll_plot.scatter(time_axis, rolld_data, c = 'r')
+roll_plot.scatter(time_axis, roll_data, c = 'g')
+
+pitch_plot.scatter(time_axis, pitchd_data, c = 'r')
+pitch_plot.scatter(time_axis, pitch_data, c = 'g')
+plt.show()
