@@ -96,11 +96,11 @@ class DroneTrajectory:
             vel = self.val(t, order=1)
 
             pose = PoseStamped()
-            pose.header = Header()
             pose.header.frame_id = frame
             pose.header.stamp = start_time + rospy.Duration(t)
-            pose.pose = Pose()
-            pose.pose.position = Point(pos[0], pos[1], pos[2])
+            pose.pose.position.x = pos[0]
+            pose.pose.position.y = pos[1]
+            pose.pose.position.z = pos[2]
 
             vel = np.array(vel) / np.linalg.norm(np.array(vel))
 
@@ -108,11 +108,9 @@ class DroneTrajectory:
             theta = asin(-vel[2])
             q = Rotation.from_euler('ZYX', [psi, theta, 0]).as_quat()
             pose.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
-
             poses.append(pose)
 
         path = Path()
-        path.header = Header
         path.header.frame_id = frame
         path.header.stamp = start_time
         path.poses = poses

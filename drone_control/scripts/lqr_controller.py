@@ -23,8 +23,7 @@ imu_data = None
 def imu_cb(data):
     imu_data = data
 
-def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
-    tf_listener = tf.TransformListener()
+def get_gate_positions(tf_listener, gate_ids, ref_frame='world', max_attempts=10):
     delay = 0.1
     gate_transforms = dict()
     attempts = max_attempts
@@ -77,9 +76,10 @@ R = np.eye(FLAT_CTRLS) * 10
 
 # Trajectory generation
 # get gate poses
-num_gates = 3
+num_gates = 1
 gate_ids = list(range(1, num_gates+1))
-gate_transforms = get_gate_positions(gate_ids)
+gate_transforms = get_gate_positions(tf_listener, gate_ids)
+
 
 # inital drone pose and generated spline of waypoints
 print("Solving for optimal trajectory...")
@@ -91,6 +91,7 @@ drone_traj.set_start(position=list(x0[:3]), velocity=list(x0[3:6]))
 for (trans, rot) in gate_transforms.values():
     drone_traj.add_gate(trans, rot)
 drone_traj.solve(aggr)
+
 
 # PID Controller for setting angular rates
 pid_phi = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
@@ -110,6 +111,7 @@ N = len(xref_traj.poses)
 time_axis = []
 xref_traj_series = np.zeros((FLAT_STATES, N))
 x_traj_series = np.zeros((FLAT_STATES, N))
+x = x0
 
 # run simulation
 print("Running simulation and executing controls...")
