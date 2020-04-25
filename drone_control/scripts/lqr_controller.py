@@ -1,4 +1,5 @@
-import numpy as np 
+#!/usr/bin/env python
+import numpy as np
 import math
 import control
 from scipy.spatial.transform import Rotation
@@ -91,6 +92,7 @@ drone_traj.set_start(position=list(x0[:3]), velocity=list(x0[3:6]))
 for (trans, rot) in gate_transforms.values():
     drone_traj.add_gate(trans, rot)
 drone_traj.solve(aggr)
+print(drone_traj.trajectory.splines[0].ts)
 
 
 # PID Controller for setting angular rates
@@ -105,6 +107,7 @@ K, S, E = control.lqr(A, B, Q, R)
 print("Generating optimal trajectory...")
 start_time = rospy.get_time()
 xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
+path_pub.publish(xref_traj)
 
 # plotting
 N = len(xref_traj.poses)
@@ -122,14 +125,14 @@ iter = 0
 #     start_sim_pub.publish(Empty())
 #     path_pub.publish(xref_traj)
 
+start_sim_pub.publish(Empty())
+
 #     # get next target waypoint
 pose = xref_traj.poses[0]
 t = rospy.get_time() - start_time
 while not rospy.is_shutdown():
-    # start_sim_pub.publish(Empty())
+    start_sim_pub.publish(Empty())
     path_pub.publish(xref_traj)
-    rate.sleep()
-    continue
 
     vx = drone_traj.val(t=t, order=1, dim=0)
     vy = drone_traj.val(t=t, order=1, dim=1)

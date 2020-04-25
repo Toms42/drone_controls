@@ -1,4 +1,5 @@
-from OptimalTrajectory import OptimalTrajectory, TrajectoryWaypoint
+from OptimalTrajectory import OptimalTrajectory
+from TrajectoryWaypoint import TrajectoryWaypoint
 import numpy as np
 from scipy.spatial.transform import Rotation
 from nav_msgs.msg import Path
@@ -24,8 +25,9 @@ class DroneTrajectory:
         self.end_pos = None
         self.end_velocity = None
         self.trajectory = None
+        self.direction_radius = 0.1
 
-        self.spacing = 0.1
+        self.spacing = 0.2
         self.ext_radius = 0.15  # ensure that this is less than spacing/sqrt(3) to properly handle diagonal gates.
         self.int_radius = 0
 
@@ -54,20 +56,23 @@ class DroneTrajectory:
         gate_waypoints = []
         # outer guiding waypoints have lower constraint, full equality constraint at center
         radii = [self.ext_radius, self.int_radius, 0, self.int_radius, self.ext_radius]
-        guide_spacing = self.spacing * np.arange(start=-2, stop=2+1)
+        guide_spacing = self.spacing * np.arange(start=-1, stop=1+1)
         for gate in self.gates:
             rotm = Rotation.from_quat(gate.orientation).as_dcm()
+            dirvec = rotm.dot(np.array([1, 0, 0]))
             for ri, offset in enumerate(guide_spacing):
                 radius = radii[ri]
                 guide_pos = rotm.dot(np.array([offset, 0, 0])) + np.array(gate.position).transpose()
                 if np.isclose(offset, 0, atol=1e-9):
                     # if is true gate, don't allow soft constraint
                     guide_wp = TrajectoryWaypoint(tuple(guide_pos.ravel()))
+                    guide_wp.add_soft_directional_constraint(1, tuple(dirvec), self.direction_radius)
+                    gate_waypoints.append(guide_wp)
                 else:
-                    guide_wp = TrajectoryWaypoint(3)
-                    guide_wp.add_soft_constraints(0, tuple(guide_pos.ravel()), (radius, radius, radius))
+                    guide_wp = TrajectoryWaypoint(tuple(guide_pos.ravel()))
+                    # guide_wp.add_soft_directional_constraint(1, tuple(dirvec), self.direction_radius)
+                    # gate_waypoints.append(guide_wp)
 
-                gate_waypoints.append(guide_wp)
 
         start_waypoint = TrajectoryWaypoint(tuple(self.start_pos))
         start_waypoint.add_hard_constraints(1, tuple(self.start_velocity))

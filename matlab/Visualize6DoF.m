@@ -3,7 +3,7 @@ classdef Visualize6DoF < handle
     %   Detailed explanation goes here
     
     properties (Constant = true)
-        frameLength = 0.5;  % length of axes. (I used meters in DH, so 0.1 = 10cm)
+        frameLength = 0.5;  % length of axes.
         frameWidth = 2;     % width of the frame quivers
 
         trace_position = true;
@@ -16,6 +16,7 @@ classdef Visualize6DoF < handle
         view_center = [0, 0, 0];        % center of the view frame
         center_around_robot = true;    % If you turn this on, the graph will be centered around the robot.
         center_around_ref_traj = false;   % If you turn this on, the graph will be centered around the reference.
+        
         align_yaw_with_robot = false;
         align_yaw_with_robot_offset = pi/2;
     end
