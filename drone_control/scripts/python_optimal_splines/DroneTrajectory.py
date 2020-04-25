@@ -25,8 +25,9 @@ class DroneTrajectory:
         self.end_velocity = None
         self.trajectory = None
 
-        self.spacing = 0.5
-        self.entry_radius = 0.25  # ensure that this is less than spacing/sqrt(3) to properly handle diagonal gates.
+        self.spacing = 0.1
+        self.ext_radius = 0.15  # ensure that this is less than spacing/sqrt(3) to properly handle diagonal gates.
+        self.int_radius = 0
 
     def set_start(self, position, velocity):
         self.start_pos = position
@@ -51,19 +52,22 @@ class DroneTrajectory:
         self.waypoints = []
 
         gate_waypoints = []
+        # outer guiding waypoints have lower constraint, full equality constraint at center
+        radii = [self.ext_radius, self.int_radius, 0, self.int_radius, self.ext_radius]
+        guide_spacing = self.spacing * np.arange(start=-2, stop=2+1)
         for gate in self.gates:
             rotm = Rotation.from_quat(gate.orientation).as_dcm()
-            entry_gate_pos = rotm.dot(np.array([-self.spacing, 0, 0]).transpose() + np.array(gate.position).transpose())
-            exit_gate_pos = rotm.dot(np.array([self.spacing, 0, 0]).transpose() + np.array(gate.position).transpose())
-            middle_gate_pos = np.array(gate.position).transpose()
+            for ri, offset in enumerate(guide_spacing):
+                radius = radii[ri]
+                guide_pos = rotm.dot(np.array([offset, 0, 0])) + np.array(gate.position).transpose()
+                if np.isclose(offset, 0, atol=1e-9):
+                    # if is true gate, don't allow soft constraint
+                    guide_wp = TrajectoryWaypoint(tuple(guide_pos.ravel()))
+                else:
+                    guide_wp = TrajectoryWaypoint(3)
+                    guide_wp.add_soft_constraints(0, tuple(guide_pos.ravel()), (radius, radius, radius))
 
-            middle_gate_wp = TrajectoryWaypoint(tuple(middle_gate_pos.ravel()))
-            entry_gate_wp = TrajectoryWaypoint(3)
-            entry_gate_wp.add_soft_constraints(0, tuple(entry_gate_pos.ravel()), (self.entry_radius, self.entry_radius, self.entry_radius))
-            exit_gate_wp = TrajectoryWaypoint(3)
-            exit_gate_wp.add_soft_constraints(0, tuple(exit_gate_pos.ravel()), (self.entry_radius, self.entry_radius, self.entry_radius))
-
-            gate_waypoints.extend([entry_gate_wp, middle_gate_wp, exit_gate_wp])
+                gate_waypoints.append(guide_wp)
 
         start_waypoint = TrajectoryWaypoint(tuple(self.start_pos))
         start_waypoint.add_hard_constraints(1, tuple(self.start_velocity))

@@ -76,7 +76,7 @@ R = np.eye(FLAT_CTRLS) * 10
 
 # Trajectory generation
 # get gate poses
-num_gates = 1
+num_gates = 3
 gate_ids = list(range(1, num_gates+1))
 gate_transforms = get_gate_positions(tf_listener, gate_ids)
 
@@ -85,7 +85,7 @@ gate_transforms = get_gate_positions(tf_listener, gate_ids)
 print("Solving for optimal trajectory...")
 dt = 0.01
 rate = rospy.Rate(int(1./dt))
-x0 = np.zeros((FLAT_STATES, 1))
+x0 = np.array([[0, 0, 1, 0, 0, 0, 0]]).T
 drone_traj = DroneTrajectory()
 drone_traj.set_start(position=list(x0[:3]), velocity=list(x0[3:6]))
 for (trans, rot) in gate_transforms.values():
@@ -104,7 +104,7 @@ K, S, E = control.lqr(A, B, Q, R)
 # Generate trajectory (starttime-sensitive)
 print("Generating optimal trajectory...")
 start_time = rospy.get_time()
-xref_traj = drone_traj.as_path(dt=dt, frame='reference', start_time=rospy.Time.now())
+xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
 
 # plotting
 N = len(xref_traj.poses)
@@ -116,13 +116,21 @@ x = x0
 # run simulation
 print("Running simulation and executing controls...")
 iter = 0
-for pose in xref_traj.poses:
-    # publish arm command and ref traj
-    start_sim_pub.publish(Empty())
-    path_pub.publish(xref_traj)
 
-    # get next target waypoint
-    t = rospy.get_time() - start_time
+# for pose in xref_traj.poses:
+#     # publish arm command and ref traj
+#     start_sim_pub.publish(Empty())
+#     path_pub.publish(xref_traj)
+
+#     # get next target waypoint
+pose = xref_traj.poses[0]
+t = rospy.get_time() - start_time
+while not rospy.is_shutdown():
+    # start_sim_pub.publish(Empty())
+    path_pub.publish(xref_traj)
+    rate.sleep()
+    continue
+
     vx = drone_traj.val(t=t, order=1, dim=0)
     vy = drone_traj.val(t=t, order=1, dim=1)
     vz = drone_traj.val(t=t, order=1, dim=2)
@@ -131,6 +139,7 @@ for pose in xref_traj.poses:
         pose.pose.orientation.y,
         pose.pose.orientation.z,
         pose.pose.orientation.w]
+
     # TODO: Use these desired roll/pitch or the ones generated from fdbk law?
     [psid, thetad, phid] = Rotation.from_quat(target_ori).as_euler('ZYX')
     
