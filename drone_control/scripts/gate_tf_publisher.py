@@ -15,15 +15,29 @@ if __name__ == '__main__':
     drone_init_pos = np.zeros((3,))
     world_vec = np.array([1, 0, 0])
     num_gates = 23
-    gate_ids = list(range(1, num_gates+1))
     gate_transforms = []
     gate_normals = []
+    gate_map = [2,
+                16,
+                20,
+                11,
+                4,
+                17,
+                1,
+                19,
+                10,
+                8,
+                23,
+                9,
+                15,
+                13]
+    gate_ids = list(range(len(gate_map)))
 
     # get all gate static transforms
     for gate_id in gate_ids:
         # TODO: Check if true gate locations(with perturbation included) are published
         try:
-            corners = rospy.get_param("/uav/Gate%d/nominal_location" % gate_id)
+            corners = rospy.get_param("/uav/Gate%d/nominal_location" % gate_map[gate_id])
         except:
             rospy.logwarn("Couldn't obtain get gate %d position" % gate_id)
 
@@ -56,7 +70,7 @@ if __name__ == '__main__':
         t.transform.rotation.z = quat[2]
         t.transform.rotation.w = quat[3]
         t.header.frame_id = "world"
-        t.child_frame_id = "gate%d" % gate_id
+        t.child_frame_id = "gate{}".format(gate_id)
 
         # don't assign timestamp or id, reuse
         gate_transforms.append(t)

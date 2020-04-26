@@ -32,7 +32,11 @@ class DroneTrajectory:
         self.int_radius = 0
 
     def set_start(self, position, velocity):
-        self.start_pos = position
+        if isinstance(position, np.ndarray):
+            position = position.ravel()
+        if isinstance(velocity, np.ndarray):
+            velocity = velocity.ravel()
+        self.start_pos = list(position)
         self.start_velocity = velocity
 
     def set_end(self, position, velocity):
@@ -43,6 +47,8 @@ class DroneTrajectory:
         self.gates = []
 
     def add_gate(self, position, orientation):
+        if isinstance(position, np.ndarray):
+            position = position.ravel()
         self.gates.append(DroneGate(position, orientation))
 
     def solve(self, aggressiveness):

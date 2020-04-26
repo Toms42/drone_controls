@@ -9,6 +9,7 @@ from math import factorial
 class TrajectoryWaypoint:
     def __init__(self, ndim):
         self.time = None
+        self.pos = None
         if isinstance(ndim, int):
             self.ndim = ndim
             self.spline_pins = [Waypoint(None) for i in range(self.ndim)]
@@ -24,6 +25,8 @@ class TrajectoryWaypoint:
         assert len(values) == self.ndim
         for i, v in enumerate(values):
             self.spline_pins[i].add_hard_constraint(order, v)
+        if order == 0:
+            self.pos = values
 
     def add_soft_constraints(self, order, values, radii):
         assert len(values) == self.ndim
@@ -47,3 +50,9 @@ class TrajectoryWaypoint:
         self.time = t
         for sp in self.spline_pins:
             sp.time = t
+
+    def get_pos(self):
+        if self.pos is None:
+            return None
+        else:
+            return self.pos
