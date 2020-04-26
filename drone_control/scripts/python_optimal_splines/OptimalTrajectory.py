@@ -36,7 +36,7 @@ class OptimalTrajectory:
         maxperseg = 500.0  # TODO: this should NOT be necessary!
 
         if self.use_faster_ts:
-            x0 = np.ones(1)*10
+            x0 = np.ones(1)*100
             bounds = [(50.0/1000, 1000)]
         else:
             x0 = np.ones(self.num_segs)*10

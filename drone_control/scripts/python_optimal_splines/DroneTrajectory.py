@@ -40,6 +40,10 @@ class DroneTrajectory:
         self.start_velocity = velocity
 
     def set_end(self, position, velocity):
+        if isinstance(position, np.ndarray):
+            position = position.ravel()
+        if isinstance(velocity, np.ndarray):
+            velocity = velocity.ravel()
         self.end_pos = position
         self.end_velocity = velocity
 
