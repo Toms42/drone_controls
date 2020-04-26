@@ -93,6 +93,17 @@ class DroneTrajectory:
         if self.trajectory is None:
             return None
         return self.trajectory.val(t, dim, order)
+    
+    def full_pose(self, time_elapsed):
+        pos = self.val(time_elapsed)
+        vel = self.val(time_elapsed, order=1)
+        unit_vec = np.array(vel) / np.linalg.norm(np.array(vel))
+
+        psi = atan2(unit_vec[1], unit_vec[0])
+        theta = asin(-unit_vec[2])
+        q = Rotation.from_euler('ZYX', [psi, theta, 0]).as_quat()
+        
+        return pos, vel, q
 
     def as_path(self, dt, start_time, frame='odom'):
         if self.trajectory is None:

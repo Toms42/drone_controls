@@ -72,8 +72,8 @@ T = 10  # seconds
 N = int((T+dt) // dt)  # num samples
 
 # PID Controller for setting angular rates
-pid_phi = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
-pid_theta = PID(Kp=12, Ki=0, Kd=4, setpoint=0)
+pid_phi = PID(Kp=7, Ki=0, Kd=1, setpoint=0)
+pid_theta = PID(Kp=7, Ki=0, Kd=1, setpoint=0)
 
 # Optimal control law for flat system
 K, S, E = control.lqr(A, B, Q, R)
@@ -93,7 +93,7 @@ fig.suptitle('Target(red) v.s actual(green) roll and pitch')
 
 # start simulation
 trans, rot = [0, 0, 0], [0, 0, 0, 1]
-x = np.zeros((FLAT_STATES, 1))
+x = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
 
 # oscillating btwn two rolls
 target_i = 0
@@ -107,7 +107,7 @@ targets = [
     np.array([[-2, 0, 1, 0, 0, 0, 0]]).T
 ]
 xref_i = 0
-xref = targets[xref_i]
+xref = np.array([[-1.16694409e-03, -4.42462022e+00, 1.11156116e+00, 0, 0, 0, 0]]).T
 
 iter = 0
 while iter < 14/dt and not rospy.is_shutdown():
@@ -127,11 +127,11 @@ while iter < 14/dt and not rospy.is_shutdown():
 
     u = -K*(x-xref) + Gff
     # [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
-    [thrustd, _, _, psid] = inverse_dyn(x, u, m)
+    [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
 
-    if iter % int(2.0/dt) == 0:
-        target_i = 1 - target_i
-        thetad = theta_targets[target_i]
+    # if iter % int(2.0/dt) == 0:
+    #     target_i = 1 - target_i
+    #     thetad = theta_targets[target_i]
         # xref_i = 1 - xref_i
         # xref = targets[xref_i]
         # print("New target: (%d,%d,%d)" % (xref[0], xref[1], xref[2]))
