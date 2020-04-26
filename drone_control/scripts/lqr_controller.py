@@ -84,8 +84,8 @@ R = np.eye(FLAT_CTRLS) * 1
 
 # Trajectory generation
 # get gate poses
-num_gates = 4
-gate_ids = list(range(1, num_gates + 1))
+num_gates = 14
+gate_ids = list(range(0, num_gates))
 gate_transforms = get_gate_positions(gate_ids)
 
 # inital drone pose and generated spline of waypoints
