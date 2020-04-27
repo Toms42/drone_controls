@@ -1,7 +1,12 @@
 import osqp
 import numpy as np
 from scipy import linalg, sparse
-
+from nav_msgs.msg import Path
+from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
+from std_msgs.msg import Header
+import rospy
+from math import atan2, asin
+from scipy.spatial.transform import Rotation
 
 class DroneMPC:
     def __init__(self, A, B, Q, R, S, N, dt, x_constraints=None, u_constraints=None):
@@ -63,6 +68,34 @@ class DroneMPC:
         x = x.reshape(self.N + 1, self.xdim).transpose()
 
         return u, x
+
+    def to_path(self, x, start_time, frame='odom'):
+        assert x.shape[0] == self.xdim
+
+        num_poses = x.shape[1]
+
+        poses = []
+        for i in range(num_poses):
+            t = start_time + rospy.Duration(self.dt * i)
+            p = PoseStamped()
+            p.pose.position = Point(x=x[0, i], y=x[1, i], z=x[2, i])
+            vel = np.array([x[3, i], x[4, i], x[5, i]])
+            vel = vel / linalg.norm(vel)
+            psi = atan2(vel[1], vel[0])
+            theta = asin(-vel[2])
+            q = Rotation.from_euler('ZYX', [psi, theta, 0]).as_quat()
+            p.pose.orientation = Quaternion(x=q[0], y=q[1], z=q[2], w=q[3])
+
+            p.header.frame_id = frame
+            p.header.stamp = t
+            poses.append(p)
+
+        path = Path()
+        path.header.frame_id = frame
+        path.header.stamp = start_time
+        path.poses = poses
+        return path
+
 
     def _build_a_bar(self, A):
         rm = A.shape[0]

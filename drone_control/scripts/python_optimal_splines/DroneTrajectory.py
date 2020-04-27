@@ -102,6 +102,9 @@ class DroneTrajectory:
     def val(self, t, order=0, dim=None):
         if self.trajectory is None:
             return None
+        last_time = self.trajectory.end_time()
+        if t > last_time:
+            t = last_time
         return self.trajectory.val(t, dim, order)
     
     def full_pose(self, time_elapsed):

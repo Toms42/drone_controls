@@ -64,6 +64,8 @@ def main():
     end_sim_pub = rospy.Publisher('/uav/input/reset', Empty, queue_size=1)
     ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
     path_pub = rospy.Publisher('ref_traj', Path, queue_size=1)
+    prediction_pub = rospy.Publisher('mpc_pred', Path, queue_size=10)
+    reference_pub = rospy.Publisher('mpc_ref', Path, queue_size=10)
     tf_br = tf.TransformBroadcaster()
 
     # Global Constants
@@ -83,7 +85,7 @@ def main():
     Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
     Q = np.diag([10, 10, 20, 0.01, 0.01, 0.01, 10])
     R = np.eye(FLAT_CTRLS) * .1
-    S = Q
+    S = Q * 10
 
     # Trajectory generation
     # get gate poses
@@ -110,8 +112,8 @@ def main():
     # Optimal control law for flat system
     print("Solving linear feedback system...")
     # K, S, E = control.lqr(A, B, Q, R)
-    horizon = 30
-    mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=dt)
+    horizon = 15
+    mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=.1)
 
     # Generate trajectory (starttime-sensitive)
     print("Generating trajectory for visualizing...")
@@ -146,7 +148,7 @@ def main():
         # get next target waypoint
         t = rospy.get_time() - start_time
         poses = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
-        vels = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
+        vels = [drone_traj.val(t + offset, dim=None, order=1) for offset in np.arange(0, (horizon + 1) * dt, dt)]
 
         ref_traj = [[p[0], p[1], p[2], v[0], v[1], v[2], 0] for p, v in zip(poses, vels)]
         pos_g, vel_g, ori_g = drone_traj.full_pose(t)
@@ -187,6 +189,10 @@ def main():
 
         u_mpc, x_mpc = mpc.solve(x, np.array(ref_traj).transpose())
         u = u_mpc[:, 0].flatten() + Gff.flatten()
+
+        reference_pub.publish(mpc.to_path(np.array(ref_traj).transpose(), start_time=rospy.Time.now(), frame='world'))
+        prediction_pub.publish(mpc.to_path(x_mpc, start_time=rospy.Time.now(), frame='world'))
+
         # print(xref)
         # print("fb: {}, ff: {}".format(-K * (x - xref), ff))
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
@@ -215,6 +221,7 @@ def main():
         # Plot results
         time_axis.append(t)
         iter += 1
+        rate.sleep()
 
     end_sim_pub.publish(Empty())
 
