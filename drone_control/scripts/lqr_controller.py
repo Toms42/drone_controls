@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import numpy as np
+import numpy as np 
 import math
 import control
 from scipy.spatial.transform import Rotation
@@ -42,23 +42,20 @@ def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
             except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
                 temp_gates.append(gate_id)
                 continue
-
+        
         print("Missing the following gates: ", temp_gates)
         gate_ids = temp_gates
         attempts -= 1
         time.sleep(delay)
-
+    
     return gate_transforms
 
 
 def main():
-    # rosparams
-    aggr = .1
-
     # init rosnodes
     rospy.init_node('lqr_controller')
     tf_listener = tf.TransformListener()
-    imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_data, queue_size=1)
+    imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_cb, queue_size=1)
     start_sim_pub = rospy.Publisher('/uav/input/arm', Empty, queue_size=1)
     end_sim_pub = rospy.Publisher('/uav/input/reset', Empty, queue_size=1)
     ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
@@ -71,6 +68,7 @@ def main():
     Izz = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_zz")
     m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
     g = 9.81
+    aggr = rospy.get_param("/splinegen/aggr")
 
     # Flat Dynamics
     FLAT_STATES = 7
@@ -81,18 +79,18 @@ def main():
     B[3:, :] = np.eye(4)
     Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
     Q = np.diag([10, 10, 10, 0.01, 0.01, 0.01, 10])
-    R = np.eye(FLAT_CTRLS) * 1
+    R = np.eye(FLAT_CTRLS) * 5
 
     # Trajectory generation
     # get gate poses
-    num_gates = 14
+    num_gates = 4
     gate_ids = list(range(0, num_gates))
     gate_transforms = get_gate_positions(gate_ids)
 
     # inital drone pose and generated spline of waypoints
     print("Solving for optimal trajectory...")
-    dt = 0.01
-    rate = rospy.Rate(int(1. / dt))
+    dt = 0.05
+    rate = rospy.Rate(int(1./dt))
     x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
     drone_traj = DroneTrajectory()
     drone_traj.set_start(position=x0[:3], velocity=x0[3:6])
@@ -113,9 +111,10 @@ def main():
     print("Generating optimal trajectory...")
     start_time = rospy.get_time()
     xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
+    max_time = xref_traj.poses[-1].header.stamp.to_sec() - start_time
 
     # plotting
-    N = 3500  # len(xref_traj.poses)
+    N = 500
     time_axis = []
     xref_traj_series = np.zeros((FLAT_STATES, N))
     x_traj_series = np.zeros((FLAT_STATES, N))
@@ -134,13 +133,13 @@ def main():
     theta_traj = []
     psi_traj = []
     # for pose in xref_traj.poses:
-    while not rospy.is_shutdown() and iter < N:
+    while not rospy.is_shutdown():
         # publish arm command and ref traj
         start_sim_pub.publish(Empty())
         path_pub.publish(xref_traj)
 
         # get next target waypoint
-        t = rospy.get_time() - start_time
+        t = (rospy.get_time() - start_time) % max_time
         pos_g, vel_g, ori_g = drone_traj.full_pose(t)
         # vx = drone_traj.val(t=t, order=1, dim=0)
         # vy = drone_traj.val(t=t, order=1, dim=1)
@@ -155,17 +154,17 @@ def main():
         # TODO: Use these desired roll/pitch or the ones generated from fdbk law?
         [psid, _, _] = Rotation.from_quat(ori_g).as_euler('ZYX')
         psid = 0
-
+        
         xref = np.array([[
             pos_g[0], pos_g[1], pos_g[2],
             vel_g[0], vel_g[1], vel_g[2],
             psid]]).T
-        xref_traj_series[:, iter] = np.ndarray.flatten(xref)
+        # xref_traj_series[:, iter] = np.ndarray.flatten(xref)
         tf_br.sendTransform((xref[0][0], xref[1][0], xref[2][0]),
-                            ori_g,
-                            rospy.Time.now(),
-                            "xref_pose",
-                            "world")
+            ori_g,
+            rospy.Time.now(),
+            "xref_pose",
+            "world")
 
         # feedforward acceleration
         ff = np.array([[
@@ -173,28 +172,26 @@ def main():
             drone_traj.val(t=t, order=2, dim=1),
             drone_traj.val(t=t, order=2, dim=2),
             0]]).T
-
+        
         try:
             (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
             continue
 
         # calculate linear velocities, define new state
-        lin_vel = (np.array(trans) - x[:3, 0]) / dt
-        x[:3, 0] = trans  # new position
-        x[3:6, 0] = lin_vel  # new linear velocity
+        lin_vel = (np.array(trans) - x[:3,0]) / dt
+        x[:3,0] = trans  # new position
+        x[3:6,0] = lin_vel  # new linear velocity
         [psi, theta, phi] = Rotation.from_quat(rot).as_euler("ZYX")
         x[6] = psi
         phi_traj.append(phi)
         theta_traj.append(theta)
         psi_traj.append(psi)
-        x_traj_series[:, iter] = np.ndarray.flatten(x)
+        # x_traj_series[:, iter] = np.ndarray.flatten(x)
 
-        u = -K * (x - xref) + Gff + ff * 0
-        print(xref)
-        # print("fb: {}, ff: {}".format(-K * (x - xref), ff))
+        u = -K*(x-xref) + Gff + ff
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
-        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
+        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m, rot)
         # [psid, thetad, phid] = Rotation.from_quat(ori_g).as_euler('ZYX')
         phid_traj.append(phid)
         thetad_traj.append(thetad)
@@ -206,7 +203,7 @@ def main():
         dpsi = u[3]
 
         # convert rotation quaternion to euler angles and rotation matrix
-
+        
         # rpy rates around around body axis
         # print(thrustd)
         new_ctrl = RateThrust()
@@ -217,23 +214,25 @@ def main():
         ctrl_pub.publish(new_ctrl)
 
         # Plot results
-        time_axis.append(t)
+        # time_axis.append(t)
         iter += 1
+        rate.sleep()
 
     end_sim_pub.publish(Empty())
 
-    fig, axs = plt.subplots(1, 3)
-    fig.suptitle('Target(red) v.s actual(green) roll and pitch')
-    axs[0].set_title('phi')
-    axs[1].set_title('theta')
-    axs[2].set_title('psi')
-    axs[0].scatter(time_axis, phid_traj, c='r')
-    axs[0].scatter(time_axis, phi_traj, c='g')
-    axs[1].scatter(time_axis, thetad_traj, c='r')
-    axs[1].scatter(time_axis, theta_traj, c='g')
-    axs[2].scatter(time_axis, psid_traj, c='r')
-    axs[2].scatter(time_axis, psi_traj, c='g')
-    plt.show()
+
+    # fig, axs = plt.subplots(1, 3)
+    # fig.suptitle('Target(red) v.s actual(green) roll and pitch')
+    # axs[0].set_title('phi')
+    # axs[1].set_title('theta')
+    # axs[2].set_title('psi')
+    # axs[0].scatter(time_axis, phid_traj, c = 'r')
+    # axs[0].scatter(time_axis, phi_traj, c = 'g')
+    # axs[1].scatter(time_axis, thetad_traj, c = 'r')
+    # axs[1].scatter(time_axis, theta_traj, c = 'g')
+    # axs[2].scatter(time_axis, psid_traj, c = 'r')
+    # axs[2].scatter(time_axis, psi_traj, c = 'g')
+    # plt.show()
 
     # plot x, y, z, vx, vy, vz
     # fig, axs = plt.subplots(3, 3)

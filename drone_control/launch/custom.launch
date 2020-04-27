@@ -7,9 +7,13 @@
   <arg name="run_challenges" default="1" /> 
   <arg name="gate_locations" default=""/>
   <arg name="render_quality" default="Fastest"/>
+  <arg name="aggressiveness" default="1"/>
+
+  <group ns="/splinegen">
+     <param name="aggr" type="double" value="$(arg aggressiveness)"/>
+  </group>
 
   <group ns="/uav">
-
     <!-- Use clock scaling -->
     <param name="/use_sim_time" value="true" />
    
