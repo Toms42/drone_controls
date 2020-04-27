@@ -45,7 +45,7 @@
     <node name="flightgoggles_marker_visualizer" pkg="flightgoggles_marker_visualizer" type="flightgoggles_marker_visualizer" />
 
     <!--Run RVIZ for visualization-->
-    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find flightgoggles)/rviz/custom.rviz" unless="$(arg render_stereo)"/>
+    <node type="rviz" name="rviz" pkg="rviz" args="-d $(find drone_control)/rviz/custom.rviz" unless="$(arg render_stereo)"/>
     <!-- <node type="rviz" name="rviz" pkg="rviz" args="-d $(find flightgoggles)/rviz/third_person_drone_follower.rviz" unless="$(arg render_stereo)"/>
     <node type="rviz" name="rviz" pkg="rviz" args="-d $(find flightgoggles)/rviz/third_person_drone_follower_stereo.rviz" if="$(arg render_stereo)"/> -->
 
