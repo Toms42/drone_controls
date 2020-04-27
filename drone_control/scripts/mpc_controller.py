@@ -18,6 +18,7 @@ from std_msgs.msg import Empty
 from sensor_msgs.msg import Imu
 from nav_msgs.msg import Path
 
+from drone_mpc.drone_mpc import DroneMPC
 from python_optimal_splines.DroneTrajectory import DroneTrajectory
 from inverseDyn import inverse_dyn
 
@@ -80,8 +81,9 @@ def main():
     B = np.zeros((FLAT_STATES, FLAT_CTRLS))
     B[3:, :] = np.eye(4)
     Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
-    Q = np.diag([10, 10, 10, 0.01, 0.01, 0.01, 10])
-    R = np.eye(FLAT_CTRLS) * 1
+    Q = np.diag([10, 10, 20, 0.01, 0.01, 0.01, 10])
+    R = np.eye(FLAT_CTRLS) * .1
+    S = Q
 
     # Trajectory generation
     # get gate poses
@@ -91,7 +93,7 @@ def main():
 
     # inital drone pose and generated spline of waypoints
     print("Solving for optimal trajectory...")
-    dt = 0.01
+    dt = 0.05
     rate = rospy.Rate(int(1. / dt))
     x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
     drone_traj = DroneTrajectory()
@@ -107,7 +109,9 @@ def main():
 
     # Optimal control law for flat system
     print("Solving linear feedback system...")
-    K, S, E = control.lqr(A, B, Q, R)
+    # K, S, E = control.lqr(A, B, Q, R)
+    horizon = 30
+    mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=dt)
 
     # Generate trajectory (starttime-sensitive)
     print("Generating optimal trajectory...")
@@ -141,25 +145,16 @@ def main():
 
         # get next target waypoint
         t = rospy.get_time() - start_time
+        poses = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
+        vels = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
+
+        ref_traj = [[p[0], p[1], p[2], v[0], v[1], v[2], 0] for p, v in zip(poses, vels)]
         pos_g, vel_g, ori_g = drone_traj.full_pose(t)
-        # vx = drone_traj.val(t=t, order=1, dim=0)
-        # vy = drone_traj.val(t=t, order=1, dim=1)
-        # vz = drone_traj.val(t=t, order=1, dim=2)
-
-        # print(pose.pose.position.x, drone_traj.val(t=t, order=0, dim=0))
-        # print(pose.pose.position.y, drone_traj.val(t=t, order=0, dim=1))
-        # print(pose.pose.position.z, drone_traj.val(t=t, order=0, dim=2))
-        # if prev_pose is not None:
-        #     dx = pose.pose.position.
-
-        # TODO: Use these desired roll/pitch or the ones generated from fdbk law?
-        [psid, _, _] = Rotation.from_quat(ori_g).as_euler('ZYX')
-        psid = 0
 
         xref = np.array([[
             pos_g[0], pos_g[1], pos_g[2],
             vel_g[0], vel_g[1], vel_g[2],
-            psid]]).T
+            0]]).T
         xref_traj_series[:, iter] = np.ndarray.flatten(xref)
         tf_br.sendTransform((xref[0][0], xref[1][0], xref[2][0]),
                             ori_g,
@@ -168,11 +163,11 @@ def main():
                             "world")
 
         # feedforward acceleration
-        ff = np.array([[
-            drone_traj.val(t=t, order=2, dim=0),
-            drone_traj.val(t=t, order=2, dim=1),
-            drone_traj.val(t=t, order=2, dim=2),
-            0]]).T
+        # ff = np.array([[
+        #     drone_traj.val(t=t, order=2, dim=0),
+        #     drone_traj.val(t=t, order=2, dim=1),
+        #     drone_traj.val(t=t, order=2, dim=2),
+        #     0]]).T
 
         try:
             (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
@@ -190,11 +185,12 @@ def main():
         psi_traj.append(psi)
         x_traj_series[:, iter] = np.ndarray.flatten(x)
 
-        u = -K * (x - xref) + Gff + ff * 0
+        u_mpc, x_mpc = mpc.solve(x, np.array(ref_traj).transpose())
+        u = u_mpc[:, 0].flatten() + Gff.flatten()
         print(xref)
         # print("fb: {}, ff: {}".format(-K * (x - xref), ff))
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
-        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
+        [thrustd, phid, thetad, psid] = inverse_dyn(x.flatten(), u, m)
         # [psid, thetad, phid] = Rotation.from_quat(ori_g).as_euler('ZYX')
         phid_traj.append(phid)
         thetad_traj.append(thetad)
