@@ -27,7 +27,7 @@ class OptimalTrajectory:
                 self.has_multispline_constraints = True
                 break
 
-    def solve(self, aggressiveness=0.1, time_opt_order=2, use_faster_ts=True):
+    def solve(self, aggressiveness=0.1, time_opt_order=1, use_faster_ts=True):
         self.use_faster_ts = use_faster_ts
         self._aggro = aggressiveness
         self._time_opt_order = time_opt_order
@@ -46,7 +46,7 @@ class OptimalTrajectory:
             self._cost_fn,
             x0,
             bounds=bounds,
-            options={'disp': False})
+            options={'disp': True})
         x = res.x
         ts = self._arrange_ts(x)
         print("Ts: {}".format(ts))
@@ -83,7 +83,7 @@ class OptimalTrajectory:
             return np.hstack((np.array([0]), np.cumsum(x)))
 
     def _cost_fn(self, x):
-        return self._aggro * sum(x) + self._compute_avg_cost_per_dim(x)
+        return self._aggro * sum(x)**2 + self._compute_avg_cost_per_dim(x)**2
 
     def _compute_avg_cost_per_dim(self, x):
         ts = self._arrange_ts(x)

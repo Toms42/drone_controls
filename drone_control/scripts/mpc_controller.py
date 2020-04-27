@@ -54,7 +54,7 @@ def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
 
 def main():
     # rosparams
-    aggr = .1
+    aggr = 10
 
     # init rosnodes
     rospy.init_node('lqr_controller')
@@ -114,7 +114,7 @@ def main():
     mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=dt)
 
     # Generate trajectory (starttime-sensitive)
-    print("Generating optimal trajectory...")
+    print("Generating trajectory for visualizing...")
     start_time = rospy.get_time()
     xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
 
@@ -187,10 +187,10 @@ def main():
 
         u_mpc, x_mpc = mpc.solve(x, np.array(ref_traj).transpose())
         u = u_mpc[:, 0].flatten() + Gff.flatten()
-        print(xref)
+        # print(xref)
         # print("fb: {}, ff: {}".format(-K * (x - xref), ff))
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
-        [thrustd, phid, thetad, psid] = inverse_dyn(x.flatten(), u, m)
+        [thrustd, phid, thetad, psid] = inverse_dyn(rot, x.flatten(), u, m)
         # [psid, thetad, phid] = Rotation.from_quat(ori_g).as_euler('ZYX')
         phid_traj.append(phid)
         thetad_traj.append(thetad)
