@@ -113,6 +113,7 @@ def main():
     print("Generating optimal trajectory...")
     start_time = rospy.get_time()
     xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
+    max_time = xref_traj.poses[-1].header.stamp.to_sec() - start_time
 
     # plotting
     N = 500
@@ -134,13 +135,13 @@ def main():
     theta_traj = []
     psi_traj = []
     # for pose in xref_traj.poses:
-    while not rospy.is_shutdown() and iter < N:
+    while not rospy.is_shutdown():
         # publish arm command and ref traj
         start_sim_pub.publish(Empty())
         path_pub.publish(xref_traj)
 
         # get next target waypoint
-        t = rospy.get_time() - start_time
+        t = (rospy.get_time() - start_time) % max_time
         pos_g, vel_g, ori_g = drone_traj.full_pose(t)
         # vx = drone_traj.val(t=t, order=1, dim=0)
         # vy = drone_traj.val(t=t, order=1, dim=1)
@@ -160,7 +161,7 @@ def main():
             pos_g[0], pos_g[1], pos_g[2],
             vel_g[0], vel_g[1], vel_g[2],
             psid]]).T
-        xref_traj_series[:, iter] = np.ndarray.flatten(xref)
+        # xref_traj_series[:, iter] = np.ndarray.flatten(xref)
         tf_br.sendTransform((xref[0][0], xref[1][0], xref[2][0]),
             ori_g,
             rospy.Time.now(),
@@ -188,7 +189,7 @@ def main():
         phi_traj.append(phi)
         theta_traj.append(theta)
         psi_traj.append(psi)
-        x_traj_series[:, iter] = np.ndarray.flatten(x)
+        # x_traj_series[:, iter] = np.ndarray.flatten(x)
 
         u = -K*(x-xref) + Gff + ff
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
@@ -215,25 +216,25 @@ def main():
         ctrl_pub.publish(new_ctrl)
 
         # Plot results
-        time_axis.append(t)
+        # time_axis.append(t)
         iter += 1
         rate.sleep()
 
     end_sim_pub.publish(Empty())
 
 
-    fig, axs = plt.subplots(1, 3)
-    fig.suptitle('Target(red) v.s actual(green) roll and pitch')
-    axs[0].set_title('phi')
-    axs[1].set_title('theta')
-    axs[2].set_title('psi')
-    axs[0].scatter(time_axis, phid_traj, c = 'r')
-    axs[0].scatter(time_axis, phi_traj, c = 'g')
-    axs[1].scatter(time_axis, thetad_traj, c = 'r')
-    axs[1].scatter(time_axis, theta_traj, c = 'g')
-    axs[2].scatter(time_axis, psid_traj, c = 'r')
-    axs[2].scatter(time_axis, psi_traj, c = 'g')
-    plt.show()
+    # fig, axs = plt.subplots(1, 3)
+    # fig.suptitle('Target(red) v.s actual(green) roll and pitch')
+    # axs[0].set_title('phi')
+    # axs[1].set_title('theta')
+    # axs[2].set_title('psi')
+    # axs[0].scatter(time_axis, phid_traj, c = 'r')
+    # axs[0].scatter(time_axis, phi_traj, c = 'g')
+    # axs[1].scatter(time_axis, thetad_traj, c = 'r')
+    # axs[1].scatter(time_axis, theta_traj, c = 'g')
+    # axs[2].scatter(time_axis, psid_traj, c = 'r')
+    # axs[2].scatter(time_axis, psi_traj, c = 'g')
+    # plt.show()
 
     # plot x, y, z, vx, vy, vz
     # fig, axs = plt.subplots(3, 3)
