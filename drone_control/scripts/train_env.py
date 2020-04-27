@@ -139,7 +139,6 @@ class Environment(object):
 
 
     def step(self, action):
-        print(action)
         [thrustd, dphi, dtheta, dpsi] = action
         new_ctrl = RateThrust()
         new_ctrl.angular_rates.x = dphi
@@ -164,12 +163,10 @@ class Environment(object):
 
     def get_agent_pose(self):
         assert(self.sim_running)
-        print('getting pose')
         try:
             (trans, rot) = self.tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
             return (trans, rot)
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            print('Could not get drone transform!')
             return None
 
     def generate_trajectory(self):
@@ -278,24 +275,33 @@ class Expert(object):
 def main():
     env = Environment()
     expert = Expert(env.x0, env.dt, env.m)
-    env.start()
-    while env.sim_running:
-        try:
-            # feedforward acceleration
-            ff = env.get_feedfwd()
+    Kp_vals = np.arange(start=5, stop=10, step=1)
+    Kd_vals = np.arange(start=0, stop=3, step=(3./5.))
+    for kp in Kp_vals:
+        for kd in Kd_vals:
+            expert.change_pids(
+                phi_params=[kp, 0, kd],
+                theta_params=[kp, 0, kd]
+            )
+            print("Kp: %.3f, Kd: %.3f" % (kp, kd))
+            env.start()
+            while env.sim_running:
+                try:
+                    # feedforward acceleration
+                    ff = env.get_feedfwd()
 
-            # get target pose
-            xref = env.get_xref()
-            
-            # get current state
-            (trans, rot) = env.get_agent_pose()
-        except Exception as e:
-            print(e)
-            continue
+                    # get target pose
+                    xref = env.get_xref()
+                    
+                    # get current state
+                    (trans, rot) = env.get_agent_pose()
+                except Exception as e:
+                    print(e)
+                    continue
 
-        action = expert.gen_action((trans, rot), xref, ff)
-        env.step(action)
-        env.rate.sleep()
+                action = expert.gen_action((trans, rot), xref, ff)
+                env.step(action)
+                env.rate.sleep()
 
 if __name__ == '__main__':
     main()
