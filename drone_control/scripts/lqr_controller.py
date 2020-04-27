@@ -52,13 +52,10 @@ def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
 
 
 def main():
-    # rosparams
-    aggr = .1
-
     # init rosnodes
     rospy.init_node('lqr_controller')
     tf_listener = tf.TransformListener()
-    imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_data, queue_size=1)
+    imu_sub = rospy.Subscriber('/uav/sensors/imu', Imu, callback=imu_cb, queue_size=1)
     start_sim_pub = rospy.Publisher('/uav/input/arm', Empty, queue_size=1)
     end_sim_pub = rospy.Publisher('/uav/input/reset', Empty, queue_size=1)
     ctrl_pub = rospy.Publisher('/uav/input/rateThrust', RateThrust, queue_size=10)
@@ -71,6 +68,7 @@ def main():
     Izz = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_inertia_zz")
     m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
     g = 9.81
+    aggr = rospy.get_param("/splinegen/aggr")
 
     # Flat Dynamics
     FLAT_STATES = 7
