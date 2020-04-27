@@ -91,7 +91,7 @@ def main():
 
     # inital drone pose and generated spline of waypoints
     print("Solving for optimal trajectory...")
-    dt = 0.01
+    dt = 0.05
     rate = rospy.Rate(int(1./dt))
     x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
     drone_traj = DroneTrajectory()
@@ -192,7 +192,7 @@ def main():
 
         u = -K*(x-xref) + Gff + ff
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
-        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m)
+        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, m, rot)
         # [psid, thetad, phid] = Rotation.from_quat(ori_g).as_euler('ZYX')
         phid_traj.append(phid)
         thetad_traj.append(thetad)
