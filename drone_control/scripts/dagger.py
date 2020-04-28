@@ -35,25 +35,21 @@ def run_episode(env, agent, expert, data, use_expert_policy):
             continue
         
         # observation from previous action since env step doesn't take effect immediately
-        if action is not None:
-            data['observations'].append(state)
+        data['observations'].append(state)
 
+        expert_action = np.array(expert.gen_action(x, rot, xref, ff))
+        data['actions'].append(expert_action)
         if use_expert_policy:
-            action = np.array(expert.gen_action(x, rot, xref, ff))
+            env.step(expert_action)
         else:
-            [action] = agent.infer(state)
-            action = np.ndarray.flatten(action).tolist()
-            print("Generated:", action)
-            print("Target: ", expert.gen_action(x, rot, xref, ff))
-
-        data['actions'].append(action)
+            print("Expert: %.3f, %.3f, %.3f, %.3f" % tuple(expert_action))
+            [agent_action] = agent.infer(state)
+            agent_action = np.ndarray.flatten(agent_action).tolist()
+            print("Agent: %.3f, %.3f, %.3f, %.3f" % tuple(agent_action))
+            env.step(agent_action)
 
         # environment will update in next iter, which will associate with this current action
-        env.step(action)
         env.rate.sleep()
-    
-    if len(data['observations']) == len(data['actions']) - 1:
-        data['actions'].pop()
         
 
 def train_dagger():
@@ -67,14 +63,17 @@ def train_dagger():
     agent = DroneAgent(log_name, learning_rate, batch_size, num_epochs)
     
     num_expert_episodes = 10
-    num_agent_episodes = 1  # 5
+    num_agent_episodes = 5
     target_gates = [0, 1, 2, 3]
     env = Environment(aggr=1, gate_ids=target_gates)
     expert = Expert(env.dt, env.m)
 
+    init_expert_weights = './checkpoint/init_expert.meta'
+    final_agent_weights = './checkpoint/final_agent.meta'
+
     if LOAD_FROM_PREV_SESS:
         print("Loading trained weights from previous session...")
-        agent.init_infer()
+        agent.init_infer(init_expert_weights)
     else:
         # initial training using expert policy
         print("Training from scratch, starting with expert...")
@@ -83,13 +82,14 @@ def train_dagger():
             'observations': [],
             'actions': []
         }
-        # TODO: for each changed param.....
-        run_episode(env, agent, expert, expert_data, use_expert_policy)
+        for i in range(num_expert_episodes):
+            # TODO: for each changed param.....
+            run_episode(env, agent, expert, expert_data, use_expert_policy)
         
         # train dagger using this initial expert data
         agent.train(expert_data)
         agent.save('init_expert')
-        agent.init_infer()
+        agent.init_infer(init_expert_weights)
 
     # now let agent execute commands to generate new set of data
     # from agent's own policy distribution
@@ -104,10 +104,11 @@ def train_dagger():
 
     print(len(agent_data['observations']))
     agent.train(agent_data)
-    agent.save()
-    # agent.init_infer()
+    agent.save('final_agent')
+    agent.init_infer(final_agent_weights)
 
     # observe results
+    print("FINAL RUN!!!")
     run_episode(env, agent, expert, agent_data, use_expert_policy)
     
     # Kp_vals = np.arange(start=5, stop=10, step=1.25)

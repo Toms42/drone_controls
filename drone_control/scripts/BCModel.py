@@ -122,8 +122,8 @@ class BCModel(object):
         saver = tf.train.import_meta_graph(path)
         saver.restore(self.sess, tf.train.latest_checkpoint('./checkpoint/'))
 
-    def init_infer(self):
-        self.restore()
+    def init_infer(self, path):
+        self.restore(path)
         self.graph = tf.get_default_graph()
         self.observations = self.graph.get_tensor_by_name('observations:0')
         self.output = self.graph.get_tensor_by_name('output_action:0')
