@@ -6,7 +6,7 @@
   <arg name="render_stereo" default="0" />
   <arg name="run_challenges" default="1" /> 
   <arg name="gate_locations" default=""/>
-  <arg name="render_quality" default="Fastest"/>
+  <arg name="render_quality" default="Best"/>
   <arg name="aggressiveness" default="1"/>
 
   <group ns="/splinegen">

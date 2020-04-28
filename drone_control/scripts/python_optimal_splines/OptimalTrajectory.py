@@ -27,7 +27,7 @@ class OptimalTrajectory:
                 self.has_multispline_constraints = True
                 break
 
-    def solve(self, aggressiveness=0.1, time_opt_order=1, use_faster_ts=True):
+    def solve(self, aggressiveness=0.1, time_opt_order=1, use_faster_ts=True, T=None):
         self.use_faster_ts = use_faster_ts
         self._aggro = aggressiveness
         self._time_opt_order = time_opt_order
@@ -35,19 +35,29 @@ class OptimalTrajectory:
         minperseg = 50.0 / 1000
         maxperseg = 500.0  # TODO: this should NOT be necessary!
 
-        if self.use_faster_ts:
-            x0 = np.ones(1)*100
-            bounds = [(50.0/1000, 1000)]
-        else:
-            x0 = np.ones(self.num_segs)*10
-            bounds = [(minperseg, maxperseg) for i in range(self.num_segs)]
+        if T is not None:
+            if not use_faster_ts:
+                print ("ERROR! Cannot use specified T unless use_faster_ts is enabled.")
+                return None
 
-        res = scipy.optimize.minimize(
-            self._cost_fn,
-            x0,
-            bounds=bounds,
-            options={'disp': True})
-        x = res.x
+        if T is None:
+            if self.use_faster_ts:
+                x0 = np.ones(1) * 100
+                bounds = [(50.0 / 1000, 1000)]
+            else:
+                x0 = np.ones(self.num_segs) * 10
+                bounds = [(minperseg, maxperseg) for i in range(self.num_segs)]
+
+            res = scipy.optimize.minimize(
+                self._cost_fn,
+                x0,
+                bounds=bounds,
+                options={'disp': True,
+                         'ftol': 1e-12,
+                         'eps': 1e-4})
+            x = res.x
+        else:
+            x = np.array([T])
         ts = self._arrange_ts(x)
         print("Ts: {}".format(ts))
         for i, wp in enumerate(self.waypoints):
@@ -75,15 +85,15 @@ class OptimalTrajectory:
             for i, wp in enumerate(self.waypoints[0:-1]):
                 # Get position:
                 pos = np.array(list(wp.get_pos()))
-                next_pos = np.array(list(self.waypoints[i+1].get_pos()))
+                next_pos = np.array(list(self.waypoints[i + 1].get_pos()))
                 dists[i] = sqrt(np.dot((next_pos - pos), (next_pos - pos)))
             v = sum(dists) / x[0]
-            return np.hstack((np.array([0]), np.cumsum([float(d)/v for d in dists])))
+            return np.hstack((np.array([0]), np.cumsum([float(d) / v for d in dists])))
         else:
             return np.hstack((np.array([0]), np.cumsum(x)))
 
     def _cost_fn(self, x):
-        return self._aggro * sum(x)**2 + self._compute_avg_cost_per_dim(x)**2
+        return self._aggro * sum(x) ** 2 + self._compute_avg_cost_per_dim(x) ** 2
 
     def _compute_avg_cost_per_dim(self, x):
         ts = self._arrange_ts(x)
@@ -108,7 +118,7 @@ class OptimalTrajectory:
         # Construct Hermitian matrix:
         H = np.zeros((x_dim, x_dim))
         for seg in range(0, num_segments):
-            Q = self._compute_Q(order, self._time_opt_order, 0, ts[seg+1] - ts[seg]) # x[seg])
+            Q = self._compute_Q(order, self._time_opt_order, 0, ts[seg + 1] - ts[seg])  # x[seg])
             H[cw * seg:cw * (seg + 1), cw * seg:cw * (seg + 1)] = Q
 
         res = 0

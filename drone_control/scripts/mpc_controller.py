@@ -21,6 +21,7 @@ from nav_msgs.msg import Path
 from drone_mpc.drone_mpc import DroneMPC
 from python_optimal_splines.DroneTrajectory import DroneTrajectory
 from inverseDyn import inverse_dyn
+from math import atan2
 
 imu_data = None
 
@@ -54,7 +55,8 @@ def get_gate_positions(gate_ids, ref_frame='world', max_attempts=10):
 
 def main():
     # rosparams
-    aggr = 10
+    aggr = 10**4
+    T = 40.0 # T=None to use aggr instead.
 
     # init rosnodes
     rospy.init_node('lqr_controller')
@@ -83,8 +85,8 @@ def main():
     B = np.zeros((FLAT_STATES, FLAT_CTRLS))
     B[3:, :] = np.eye(4)
     Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
-    Q = np.diag([10, 10, 20, 0.01, 0.01, 0.01, 10])
-    R = np.eye(FLAT_CTRLS) * .1
+    Q = np.diag([20, 20, 20, 0.1, 0.1, 0.1, 1])
+    R = np.diag([.1, .1, .1, 10])
     S = Q * 10
 
     # Trajectory generation
@@ -103,7 +105,7 @@ def main():
     drone_traj.set_end(position=x0[:3], velocity=x0[3:6])
     for (trans, rot) in gate_transforms.values():
         drone_traj.add_gate(trans, rot)
-    drone_traj.solve(aggr)
+    drone_traj.solve(aggr, T=T)
 
     # PID Controller for setting angular rates
     pid_phi = PID(Kp=7, Ki=0, Kd=1, setpoint=0)
@@ -112,8 +114,8 @@ def main():
     # Optimal control law for flat system
     print("Solving linear feedback system...")
     # K, S, E = control.lqr(A, B, Q, R)
-    horizon = 15
-    mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=.1)
+    horizon = 10
+    mpc = DroneMPC(A, B, Q, R, S, N=horizon, dt=dt)
 
     # Generate trajectory (starttime-sensitive)
     print("Generating trajectory for visualizing...")
@@ -145,32 +147,6 @@ def main():
         start_sim_pub.publish(Empty())
         path_pub.publish(xref_traj)
 
-        # get next target waypoint
-        t = rospy.get_time() - start_time
-        poses = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
-        vels = [drone_traj.val(t + offset, dim=None, order=1) for offset in np.arange(0, (horizon + 1) * dt, dt)]
-
-        ref_traj = [[p[0], p[1], p[2], v[0], v[1], v[2], 0] for p, v in zip(poses, vels)]
-        pos_g, vel_g, ori_g = drone_traj.full_pose(t)
-
-        xref = np.array([[
-            pos_g[0], pos_g[1], pos_g[2],
-            vel_g[0], vel_g[1], vel_g[2],
-            0]]).T
-        xref_traj_series[:, iter] = np.ndarray.flatten(xref)
-        tf_br.sendTransform((xref[0][0], xref[1][0], xref[2][0]),
-                            ori_g,
-                            rospy.Time.now(),
-                            "xref_pose",
-                            "world")
-
-        # feedforward acceleration
-        # ff = np.array([[
-        #     drone_traj.val(t=t, order=2, dim=0),
-        #     drone_traj.val(t=t, order=2, dim=1),
-        #     drone_traj.val(t=t, order=2, dim=2),
-        #     0]]).T
-
         try:
             (trans, rot) = tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
@@ -186,6 +162,44 @@ def main():
         theta_traj.append(theta)
         psi_traj.append(psi)
         x_traj_series[:, iter] = np.ndarray.flatten(x)
+
+        # get next target waypoint
+        t = rospy.get_time() - start_time
+        poses = [drone_traj.val(t + offset, dim=None, order=0) for offset in np.arange(0, (horizon + 1) * dt, dt)]
+        vels = [drone_traj.val(t + offset, dim=None, order=1) for offset in np.arange(0, (horizon + 1) * dt, dt)]
+        psis = [atan2(v[1], v[0]) for v in vels]
+
+        if psis[0] - psi < -np.pi:
+            psis[0] += 2*np.pi
+        if psis[0] - psi > np.pi:
+            psis[0] -= 2*np.pi
+
+        for i in range(len(psis[0:-2])):
+            if psis[i+1] - psis[i] < -np.pi:
+                psis[i+1] += 2*np.pi
+            if psis[i+1] - psis[i] > np.pi:
+                psis[i+1] -= 2*np.pi
+
+        ref_traj = [[p[0], p[1], p[2], v[0], v[1], v[2], psi] for p, v, psi in zip(poses, vels, psis)]
+        pos_g, vel_g, ori_g = drone_traj.full_pose(t)
+
+        xref = np.array([[
+            pos_g[0], pos_g[1], pos_g[2],
+            vel_g[0], vel_g[1], vel_g[2],
+            psis[0]]]).T
+        xref_traj_series[:, iter] = np.ndarray.flatten(xref)
+        tf_br.sendTransform((xref[0][0], xref[1][0], xref[2][0]),
+                            ori_g,
+                            rospy.Time.now(),
+                            "xref_pose",
+                            "world")
+
+        # feedforward acceleration
+        # ff = np.array([[
+        #     drone_traj.val(t=t, order=2, dim=0),
+        #     drone_traj.val(t=t, order=2, dim=1),
+        #     drone_traj.val(t=t, order=2, dim=2),
+        #     0]]).T
 
         u_mpc, x_mpc = mpc.solve(x, np.array(ref_traj).transpose())
         u = u_mpc[:, 0].flatten() + Gff.flatten()

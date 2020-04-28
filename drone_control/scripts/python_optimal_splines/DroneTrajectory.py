@@ -55,7 +55,7 @@ class DroneTrajectory:
             position = position.ravel()
         self.gates.append(DroneGate(position, orientation))
 
-    def solve(self, aggressiveness):
+    def solve(self, aggressiveness, T=None):
         if self.start_pos is None:
             return None
         if len(self.gates) == 0 and self.end_pos is None:
@@ -66,7 +66,7 @@ class DroneTrajectory:
         gate_waypoints = []
         # outer guiding waypoints have lower constraint, full equality constraint at center
         radii = [self.ext_radius, self.int_radius, 0, self.int_radius, self.ext_radius]
-        guide_spacing = self.spacing * np.arange(start=-1, stop=1+1)
+        guide_spacing = self.spacing * np.arange(start=-1, stop=1 + 1)
         for gate in self.gates:
             rotm = Rotation.from_quat(gate.orientation).as_dcm()
             dirvec = rotm.dot(np.array([1, 0, 0]))
@@ -83,7 +83,6 @@ class DroneTrajectory:
                     # guide_wp.add_soft_directional_constraint(1, tuple(dirvec), self.direction_radius)
                     # gate_waypoints.append(guide_wp)
 
-
         start_waypoint = TrajectoryWaypoint(tuple(self.start_pos))
         start_waypoint.add_hard_constraints(1, tuple(self.start_velocity))
 
@@ -97,7 +96,7 @@ class DroneTrajectory:
             self.waypoints.append(end_waypoint)
 
         self.trajectory = OptimalTrajectory(5, 3, self.waypoints)
-        self.trajectory.solve(aggressiveness)
+        self.trajectory.solve(aggressiveness, T=T)
 
     def val(self, t, order=0, dim=None):
         if self.trajectory is None:
@@ -106,7 +105,7 @@ class DroneTrajectory:
         if t > last_time:
             t = last_time
         return self.trajectory.val(t, dim, order)
-    
+
     def full_pose(self, time_elapsed):
         pos = self.val(time_elapsed)
         vel = self.val(time_elapsed, order=1)
@@ -115,7 +114,7 @@ class DroneTrajectory:
         psi = atan2(unit_vec[1], unit_vec[0])
         theta = asin(-unit_vec[2])
         q = Rotation.from_euler('ZYX', [psi, theta, 0]).as_quat()
-        
+
         return pos, vel, q
 
     def as_path(self, dt, start_time, frame='odom'):
