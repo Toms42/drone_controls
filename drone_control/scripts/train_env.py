@@ -272,11 +272,11 @@ class Expert(object):
         action = [thrustd, dphi, dtheta, dpsi]
         return action
 
-def main():
-    env = Environment()
+def test():
+    env = Environment(aggr=1)
     expert = Expert(env.x0, env.dt, env.m)
-    Kp_vals = np.arange(start=5, stop=10, step=1)
-    Kd_vals = np.arange(start=0, stop=3, step=(3./5.))
+    Kp_vals = np.arange(start=5, stop=10, step=1.25)
+    Kd_vals = np.arange(start=0, stop=3, step=1.5)
     for kp in Kp_vals:
         for kd in Kd_vals:
             expert.change_pids(
@@ -284,7 +284,7 @@ def main():
                 theta_params=[kp, 0, kd]
             )
             print("Kp: %.3f, Kd: %.3f" % (kp, kd))
-            env.start()
+            env.start(Nsecs=10)
             while env.sim_running:
                 try:
                     # feedforward acceleration
@@ -302,6 +302,3 @@ def main():
                 action = expert.gen_action((trans, rot), xref, ff)
                 env.step(action)
                 env.rate.sleep()
-
-if __name__ == '__main__':
-    main()
