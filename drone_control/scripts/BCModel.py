@@ -21,6 +21,10 @@ class BCModel(object):
         self.actions = None
         self.sess = tf.InteractiveSession()
         self.build_graph()
+        init_g = tf.global_variables_initializer()
+        init_l = tf.local_variables_initializer()
+        self.sess.run(init_g)
+        self.sess.run(init_l)
 
         self.checkpoint_path = checkpoint_path
         self.saver = tf.train.Saver()
@@ -102,7 +106,6 @@ class BCModel(object):
             for i in range(num_batches+1):
                 observations_data = expert_data['observations'][i*self.BATCH_SIZE:(i+1)*self.BATCH_SIZE]
                 actions_data = expert_data['actions'][i*self.BATCH_SIZE:(i+1)*self.BATCH_SIZE]
-                actions_data = [x[0] for x in actions_data]
 
                 feed_data = {
                     self.observations: observations_data,
@@ -112,13 +115,15 @@ class BCModel(object):
                 print("epoch %d \t batch number %d \t loss is %f" % (epoch, i, loss))
                 self.summary_writer.add_summary(summary, epoch * num_batches + i)
 
-    def save(self):
-        self.saver.save(self.sess, self.checkpoint_path + 'bc-model')
+    def save(self, filename):
+        self.saver.save(self.sess, self.checkpoint_path + filename)
 
-    def init_infer(self):
-        saver = tf.train.import_meta_graph('./checkpoint/bc-model.meta')
+    def restore(self, path='./checkpoint/bc-model.meta'):
+        saver = tf.train.import_meta_graph(path)
         saver.restore(self.sess, tf.train.latest_checkpoint('./checkpoint/'))
 
+    def init_infer(self):
+        self.restore()
         self.graph = tf.get_default_graph()
         self.observations = self.graph.get_tensor_by_name('observations:0')
         self.output = self.graph.get_tensor_by_name('output_action:0')

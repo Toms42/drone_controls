@@ -64,7 +64,9 @@ class Environment(object):
         # Drone Constants
         self.m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
         self.g = 9.81
-        self.x = self.xref = self.x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
+        self.x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
+        self.xref = np.copy(self.x0)
+        self.x = np.copy(self.x0)
         self.xrot = [0, 0, 0, 1]  # zero rotation quat
         
         # Gate Positions
@@ -75,6 +77,8 @@ class Environment(object):
         # Simulation params
         self.dt = 0.05
         self.rate = rospy.Rate(int(1./self.dt))
+        self.prev_time = rospy.get_time()
+        self.cur_time = rospy.get_time()
 
         # Generate Trajectory
         self.generate_trajectory()
@@ -101,20 +105,23 @@ class Environment(object):
     @threaded
     def run_sim(self, Nsecs):
         run_forever = (Nsecs == -1)
-        elapsed_time = rospy.get_time() - self.start_time
+        self.cur_time = self.prev_time = rospy.get_time()
+        elapsed_time = self.cur_time - self.start_time
         while not rospy.is_shutdown() and (elapsed_time < Nsecs or run_forever):
+            self.cur_time = rospy.get_time()
             # publish arm command and ref traj
             self.start_sim_pub.publish(Empty())
             if self.is_viz_ref_traj: self.path_pub.publish(self.xref_traj)
 
             # update time
-            elapsed_time = rospy.get_time() - self.start_time
+            elapsed_time = self.cur_time - self.start_time
             self.track_time = elapsed_time % self.max_time
 
             # get next target waypoint
             pos_g, vel_g, ori_g = self.drone_traj.full_pose(self.track_time)
             psid = 0
-            
+
+            self._get_agent_pose()
             self.xref = np.array([[
                 pos_g[0], pos_g[1], pos_g[2],
                 vel_g[0], vel_g[1], vel_g[2],
@@ -127,13 +134,17 @@ class Environment(object):
                     "xref_pose",
                     "world")
 
-            self._get_agent_pose()
+            self.prev_time = self.cur_time
 
             self.rate.sleep()
         
         self.end()
 
     def end(self):
+        # reset state
+        self.x = np.copy(self.x0)
+        self.xref = np.copy(self.x0)
+        self.xrot = [0, 0, 0, 1]
         self.sim_running = False
         self.end_sim_pub.publish(Empty())
 
@@ -171,7 +182,8 @@ class Environment(object):
         assert(self.sim_running)
         try:
             (trans, self.xrot) = self.tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
-            lin_vel = (np.array(trans) - self.x[:3,0]) / self.dt
+            # max(dt, elapsed) in case loop runs slower than dt
+            lin_vel = (np.array(trans) - self.x[:3,0]) / max(self.dt, self.cur_time - self.prev_time)
             self.x[:3,0] = trans  # new position
             self.x[3:6,0] = lin_vel  # new linear velocity
             [psi, theta, phi] = Rotation.from_quat(self.xrot).as_euler("ZYX")
@@ -299,6 +311,7 @@ def test():
             )
             print("Kp: %.3f, Kd: %.3f" % (kp, kd))
             env.start(Nsecs=10)
+            print("NEW EPISODE!!!!")
             while env.sim_running:
                 try:
                     # feedforward acceleration
