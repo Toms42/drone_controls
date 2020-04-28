@@ -65,6 +65,9 @@ class Environment(object):
         self.m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
         self.g = 9.81
         self.x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
+        self.xref = np.copy(self.x0)
+        self.x = np.copy(self.x0)
+        self.xrot = [0, 0, 0, 1]  # zero rotation quat
         
         # Gate Positions
         self.available_gates = list(range(23))  # TODO: probably not the best method, but temporary
@@ -74,6 +77,8 @@ class Environment(object):
         # Simulation params
         self.dt = 0.05
         self.rate = rospy.Rate(int(1./self.dt))
+        self.prev_time = rospy.get_time()
+        self.cur_time = rospy.get_time()
 
         # Generate Trajectory
         self.generate_trajectory()
@@ -90,9 +95,6 @@ class Environment(object):
         # Generate trajectory (starttime-sensitive)
         print("Generating optimal trajectory...")
         self.start_time = rospy.get_time()
-        self.xref_traj = self.drone_traj.as_path(dt=self.dt, frame='world', start_time=rospy.Time.now())
-        self.max_time = self.xref_traj.poses[-1].header.stamp.to_sec() - self.start_time
-        self.xref = self.x0
         self.track_time = 0
         self.sim_running = True
         
@@ -103,20 +105,23 @@ class Environment(object):
     @threaded
     def run_sim(self, Nsecs):
         run_forever = (Nsecs == -1)
-        elapsed_time = rospy.get_time() - self.start_time
+        self.cur_time = self.prev_time = rospy.get_time()
+        elapsed_time = self.cur_time - self.start_time
         while not rospy.is_shutdown() and (elapsed_time < Nsecs or run_forever):
+            self.cur_time = rospy.get_time()
             # publish arm command and ref traj
             self.start_sim_pub.publish(Empty())
             if self.is_viz_ref_traj: self.path_pub.publish(self.xref_traj)
 
             # update time
-            elapsed_time = rospy.get_time() - self.start_time
+            elapsed_time = self.cur_time - self.start_time
             self.track_time = elapsed_time % self.max_time
 
             # get next target waypoint
             pos_g, vel_g, ori_g = self.drone_traj.full_pose(self.track_time)
             psid = 0
-            
+
+            self._get_agent_pose()
             self.xref = np.array([[
                 pos_g[0], pos_g[1], pos_g[2],
                 vel_g[0], vel_g[1], vel_g[2],
@@ -129,11 +134,17 @@ class Environment(object):
                     "xref_pose",
                     "world")
 
+            self.prev_time = self.cur_time
+
             self.rate.sleep()
         
         self.end()
 
     def end(self):
+        # reset state
+        self.x = np.copy(self.x0)
+        self.xref = np.copy(self.x0)
+        self.xrot = [0, 0, 0, 1]
         self.sim_running = False
         self.end_sim_pub.publish(Empty())
 
@@ -162,26 +173,48 @@ class Environment(object):
         return ff
 
     def get_agent_pose(self):
+        # external calls to this
+        assert(self.sim_running)
+        return self.x, self.xrot
+
+    def _get_agent_pose(self):
+        # only called within simulation
         assert(self.sim_running)
         try:
-            (trans, rot) = self.tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
-            return (trans, rot)
+            (trans, self.xrot) = self.tf_listener.lookupTransform('world', 'uav/imu', rospy.Time(0))
+            # max(dt, elapsed) in case loop runs slower than dt
+            lin_vel = (np.array(trans) - self.x[:3,0]) / max(self.dt, self.cur_time - self.prev_time)
+            self.x[:3,0] = trans  # new position
+            self.x[3:6,0] = lin_vel  # new linear velocity
+            [psi, theta, phi] = Rotation.from_quat(self.xrot).as_euler("ZYX")
+            self.x[6] = psi
         except (tf.LookupException, tf.ConnectivityException, tf.ExtrapolationException):
-            return None
+            print("Couldn't listen to current state...")
+            return
 
     def generate_trajectory(self):
         print("Solving for optimal trajectory...")
         self.drone_traj = DroneTrajectory()
         self.drone_traj.set_start(position=self.x0[:3], velocity=self.x0[3:6])
         self.drone_traj.set_end(position=self.x0[:3], velocity=self.x0[3:6])
-        for (trans, rot) in self.gate_transforms.values():
-            self.drone_traj.add_gate(trans, rot)
+        for gate_id in self.gate_ids:
+            try:
+                (trans, rot) = self.gate_transforms[gate_id]
+                self.drone_traj.add_gate(trans, rot)
+            except KeyError:
+                print("Gate %d doesn't exist, skipping..." % gate_id)
+                continue
+                
         self.drone_traj.solve(self.aggr)
+        self.xref_traj = self.drone_traj.as_path(dt=self.dt, frame='world', start_time=rospy.Time.now())
+        self.max_time = self.xref_traj.poses[-1].header.stamp.to_sec() - rospy.get_time()
         
 
     def change_gate_ids(self, targets):
+        print("Setting new gate targets, solving new trajectory...")
         self.gate_ids = targets
-        self.gate_transforms = Environment.get_gate_positions(self.gate_ids)
+        self.gate_transforms = self.get_gate_positions()
+        self.generate_trajectory()
 
     def imu_cb(self, data):
         self.imu_data = data
@@ -209,8 +242,7 @@ class Environment(object):
         return gate_transforms
 
 class Expert(object):
-    def __init__(self, x0, dt, m):
-        self.x = x0
+    def __init__(self, dt, m):
         self.dt = dt
         self.m = m
 
@@ -252,18 +284,12 @@ class Expert(object):
         print("Updating linear feedback system...")
         self.K, S, E = control.lqr(self.A, self.B, self.Q, self.R)
 
-    def gen_action(self, cur_pose, xref, ff):
-        (trans, rot) = cur_pose
-        lin_vel = (np.array(trans) - self.x[:3,0]) / self.dt
-        self.x[:3,0] = trans  # new position
-        self.x[3:6,0] = lin_vel  # new linear velocity
-        [psi, theta, phi] = Rotation.from_quat(rot).as_euler("ZYX")
-        self.x[6] = psi
-
-        u = -self.K*(self.x-xref) + self.Gff + ff
-        [thrustd, phid, thetad, psid] = inverse_dyn(self.x, u, self.m, rot)
+    def gen_action(self, x, rot, xref, ff):
+        u = -self.K*(x-xref) + self.Gff + ff
+        [thrustd, phid, thetad, psid] = inverse_dyn(x, u, self.m, rot)
 
         # generate desired roll, pitch rates, minimize error btwn desired and current
+        [psi, theta, phi] = Rotation.from_quat(rot).as_euler('ZYX')
         dphi = self.pid_phi(phi - phid)
         dtheta = self.pid_theta(theta - thetad)
         dpsi = u[3]
@@ -272,11 +298,11 @@ class Expert(object):
         action = [thrustd, dphi, dtheta, dpsi]
         return action
 
-def main():
-    env = Environment()
-    expert = Expert(env.x0, env.dt, env.m)
-    Kp_vals = np.arange(start=5, stop=10, step=1)
-    Kd_vals = np.arange(start=0, stop=3, step=(3./5.))
+def test():
+    env = Environment(aggr=1)
+    expert = Expert(env.dt, env.m)
+    Kp_vals = np.arange(start=5, stop=10, step=1.25)
+    Kd_vals = np.arange(start=0, stop=3, step=1.5)
     for kp in Kp_vals:
         for kd in Kd_vals:
             expert.change_pids(
@@ -284,7 +310,8 @@ def main():
                 theta_params=[kp, 0, kd]
             )
             print("Kp: %.3f, Kd: %.3f" % (kp, kd))
-            env.start()
+            env.start(Nsecs=10)
+            print("NEW EPISODE!!!!")
             while env.sim_running:
                 try:
                     # feedforward acceleration
@@ -294,14 +321,14 @@ def main():
                     xref = env.get_xref()
                     
                     # get current state
-                    (trans, rot) = env.get_agent_pose()
+                    x, rot = env.get_agent_pose()
                 except Exception as e:
                     print(e)
                     continue
 
-                action = expert.gen_action((trans, rot), xref, ff)
+                action = expert.gen_action(x, rot, xref, ff)
                 env.step(action)
                 env.rate.sleep()
 
-if __name__ == '__main__':
-    main()
+if __name__=='__main__':
+    test()

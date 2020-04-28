@@ -239,40 +239,41 @@ def main():
 
     end_sim_pub.publish(Empty())
 
-    fig, axs = plt.subplots(1, 3)
-    fig.suptitle('Target(red) v.s actual(green) roll and pitch')
-    axs[0].set_title('phi')
-    axs[1].set_title('theta')
-    axs[2].set_title('psi')
-    axs[0].scatter(time_axis, phid_traj, c='r')
-    axs[0].scatter(time_axis, phi_traj, c='g')
-    axs[1].scatter(time_axis, thetad_traj, c='r')
-    axs[1].scatter(time_axis, theta_traj, c='g')
-    axs[2].scatter(time_axis, psid_traj, c='r')
-    axs[2].scatter(time_axis, psi_traj, c='g')
-    plt.show()
+    # fig, axs = plt.subplots(1, 3)
+    # fig.suptitle('Target(red) v.s actual(green) roll and pitch')
+    # axs[0].set_title('phi')
+    # axs[1].set_title('theta')
+    # axs[2].set_title('psi')
+    # axs[0].scatter(time_axis, phid_traj, c='r')
+    # axs[0].scatter(time_axis, phi_traj, c='g')
+    # axs[1].scatter(time_axis, thetad_traj, c='r')
+    # axs[1].scatter(time_axis, theta_traj, c='g')
+    # axs[2].scatter(time_axis, psid_traj, c='r')
+    # axs[2].scatter(time_axis, psi_traj, c='g')
+    # plt.show()
 
     # plot x, y, z, vx, vy, vz
-    # fig, axs = plt.subplots(3, 3)
-    # axs[0, 0].set_title('X')
-    # axs[0, 1].set_title('Y')
-    # axs[0, 2].set_title('Z')
-    # axs[1, 0].set_title('VX')
-    # axs[1, 1].set_title('VY')
-    # axs[1, 2].set_title('VZ')
-    # for ax in axs.flat:
-    #     ax.set(xlabel='Time(s)')
-    # fig.suptitle('Target(red) v.s actual(green) roll and pitch')
-    # for i in range(3):
-    #     # position
-    #     axs[0, i].scatter(time_axis, xref_traj_series[i,:iter], c = 'r')
-    #     axs[0, i].scatter(time_axis, x_traj_series[i,:iter], c = 'g')
+    fig, axs = plt.subplots(2, 3)
+    axs[0, 0].set_title('X')
+    axs[0, 1].set_title('Y')
+    axs[0, 2].set_title('Z')
+    axs[1, 0].set_title('VX')
+    axs[1, 1].set_title('VY')
+    axs[1, 2].set_title('VZ')
+    for ax in axs.flat:
+        ax.set(xlabel='Time(s)')
+    fig.suptitle('Absolute State error v.s time (MPC)')
+    x_error = abs(xref_traj_series - x_traj_series)
+    for i in range(3):
+        # position
+        axs[0, i].scatter(time_axis, x_error[i,:iter], c = 'r')
+        # axs[0, i].scatter(time_axis, x_traj_series[i,:iter], c = 'g')
 
-    #     # velocity
-    #     axs[1, i].scatter(time_axis, xref_traj_series[i+3,:iter], c = 'r')
-    #     axs[1, i].scatter(time_axis, x_traj_series[i+3,:iter], c = 'g')
+        # velocity
+        # axs[1, i].scatter(time_axis, xref_traj_series[i+3,:iter], c = 'r')
+        axs[1, i].scatter(time_axis, x_error[i+3,:iter], c = 'g')
 
-    # plt.show()
+    plt.show()
 
 
 if __name__ == '__main__':
