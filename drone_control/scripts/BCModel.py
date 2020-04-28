@@ -19,7 +19,7 @@ class BCModel(object):
         self.action_dim = action_dim
         self.observations = None
         self.actions = None
-        self.sess = tf.get_default_session()
+        self.sess = tf.InteractiveSession()
         self.build_graph()
 
         self.checkpoint_path = checkpoint_path
@@ -28,6 +28,7 @@ class BCModel(object):
 
 
     def build_graph(self):
+        # (number of rows == number of training samples) is unknown, so None
         self.observations = tf.placeholder(shape=(None, self.observation_dim), dtype=tf.float32, name='observations')
         self.actions = tf.placeholder(shape=(None, self.action_dim), dtype=tf.float32, name='actions')
 
@@ -42,6 +43,7 @@ class BCModel(object):
                              regularizer=regularizer,
                              initializer=tf.contrib.layers.xavier_initializer(),
                              name='W1')
+        # print(W1.get_shape())
         b1 = tf.get_variable(shape=(1, 128),
                          initializer=tf.contrib.layers.xavier_initializer(),
                          name='b1')
@@ -64,7 +66,7 @@ class BCModel(object):
         lstm_outputs, state = tf.contrib.rnn.static_rnn(encoderCell, x_split, dtype=tf.float32)
         lstm_output = lstm_outputs[-1]
 
-        W3 = tf.get_variable(shape=(64, self.action_dim),
+        W3 = tf.get_variable(shape=(32, self.action_dim),
                              regularizer=regularizer,
                              initializer=tf.contrib.layers.xavier_initializer(),
                              name='W3')

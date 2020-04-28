@@ -2,66 +2,118 @@ import numpy as np
 from train_env import Environment, Expert
 from BCModel import BCModel
 
+
+class DroneAgent(BCModel):
+    def __init__(self, log_name, learning_rate, batch_size, num_epochs):
+        self.sym_state = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'qx', 'qy', 'qz', 'qw', 
+            'xr', 'yr', 'zr', 'vxr', 'vyr', 'vzr']
+        self.sym_action = ['thrust', 'dphi', 'dtheta', 'dpsi']
+        observation_dim = len(self.sym_state)  # current pose, target lin pos/vel
+        action_dim = len(self.sym_action) 
+        super(DroneAgent, self).__init__(log_name=log_name, 
+            observation_dim=observation_dim, action_dim=action_dim,
+            learning_rate=learning_rate, batch_size=batch_size, num_epochs=num_epochs)
+
+
+def run_episode(env, agent, expert, data, use_expert_policy):
+    env.start(Nsecs=env.max_time)
+    action = None
+    while env.sim_running:
+        try:
+            # feedforward acceleration
+            ff = env.get_feedfwd()
+
+            # get target pose
+            xref = env.get_xref()
+            
+            # get current state
+            (trans, rot) = env.get_agent_pose()
+            state = np.array(list(trans) + list(rot) + xref[0:6, 0].tolist())
+
+        except Exception as e:
+            print(e)
+            continue
+        
+        # observation from previous action since env step doesn't take effect immediately
+        if action is not None:
+            data['observations'].append(state)
+
+        if use_expert_policy:
+            action = np.array(expert.gen_action((trans, rot), xref, ff))
+        else:
+            action = agent.infer(state)
+
+        data['actions'].append(action)
+
+        # environment will update in next iter, which will associate with this current action
+        env.step(action)
+        env.rate.sleep()
+    
+    if len(data['observations']) == len(data['actions']) - 1:
+        data['actions'].pop()
+        
+
 def train_dagger():
     # network parameters
-    log_name "../logs"
+    log_name = "../logs"
     learning_rate = 0.001
     batch_size = 64
     num_epochs = 50
     agent = DroneAgent(log_name, learning_rate, batch_size, num_epochs)
+    
+    num_agent_episodes = 5
+    target_gates = [0, 1, 2, 3]
+    env = Environment(aggr=1, gate_ids=target_gates)
+    expert = Expert(env.x0, env.dt, env.m)
 
-    # define training data
+    # initial training using expert policy
+    use_expert_policy = True
     expert_data = {
-        'observations': []
+        'observations': [],
         'actions': []
     }
+    # TODO: for each changed param.....
+    run_episode(env, agent, expert, expert_data, use_expert_policy)
     
-    env = Environment(aggr=1)
-    expert = Expert(env.x0, env.dt, env.m)
-    Kp_vals = np.arange(start=5, stop=10, step=1.25)
-    Kd_vals = np.arange(start=0, stop=3, step=1.5)
+    # train dagger using this initial expert data
+    print(len(expert_data['observations']))
+    agent.train(expert_data)
+    agent.save()
+
+    # now let agent execute commands to generate new set of data
+    # from agent's own policy distribution
+    use_expert_policy = False
+    agent_data = {
+        'observations': [],
+        'actions': []
+    }
+    for i in range(num_agent_episodes):
+        # TODO: for each changed param.....
+        run_episode(env, agent, expert, agent_data, use_expert_policy)
+
+    agent.train(agent_data)
+    agent.save()
+
+    # observe results
+    run_episode(env, agent, expert, agent_data, use_expert_policy)
+    
+    # Kp_vals = np.arange(start=5, stop=10, step=1.25)
+    # Kd_vals = np.arange(start=0, stop=3, step=1.5)
 
     # parameters to vary:
     # spline aggressiveness
     # Kp and Kd values for PID
-    # Q, R diagonals 
+    # Q, R, S diagonals 
+    # trajectories
+    
+    # first create a list of diffferent gateid series ~10
+    # 7 train, 3 test
+    # see if just one trajectory, perfect case works
+    # next learn different trajectories
+    # next modify spline aggressiveness
 
-    for kp in Kp_vals:
-        for kd in Kd_vals:
-            expert.change_pids(
-                phi_params=[kp, 0, kd],
-                theta_params=[kp, 0, kd]
-            )
-            print("Kp: %.3f, Kd: %.3f" % (kp, kd))
-            env.start(Nsecs=10)
-            while env.sim_running:
-                try:
-                    # feedforward acceleration
-                    ff = env.get_feedfwd()
+    # For OIL: modify Kp and Kd values enough to notice some difference
 
-                    # get target pose
-                    xref = env.get_xref()
-                    
-                    # get current state
-                    (trans, rot) = env.get_agent_pose()
-                except Exception as e:
-                    print(e)
-                    continue
-
-                action = expert.gen_action((trans, rot), xref, ff)
-                env.step(action)
-                env.rate.sleep()
-
-class DroneAgent(BCModel):
-    def __init__(self, log_name, learning_rate, batch_size, num_epochs):
-        self.sym_state = ['x', 'y', 'z', 'vx', 'vy', 'vz', 'qx', 'qy', 'qz', 'qw']
-        self.sym_action = ['thrust', 'dphi', 'dtheta', 'dpsi']
-        observation_dim = (len(self.sym_state)*2, 1)  # current and target position
-        action_dim = (len(self.sym_action), 1)
-        super().__init__(log_name=log_name, observation_dim=observation_dim, action_dim=action_dim,
-            learning_rate=learning_rate, batch_size=batch_size, num_epochs=num_epochs)
-
-    def 
-
-
+if __name__=='__main__':
+    train_dagger()
 
