@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import numpy as np
-import math
 import control
 from scipy.spatial.transform import Rotation
 from simple_pid import PID
@@ -97,7 +96,7 @@ def main():
 
     # inital drone pose and generated spline of waypoints
     print("Solving for optimal trajectory...")
-    dt = 0.05
+    dt = 0.06
     rate = rospy.Rate(int(1. / dt))
     x0 = np.array([[0., 0., 1., 0., 0., 0., 0.]]).T
     drone_traj = DroneTrajectory()
@@ -123,7 +122,7 @@ def main():
     xref_traj = drone_traj.as_path(dt=dt, frame='world', start_time=rospy.Time.now())
 
     # plotting
-    N = 3500  # len(xref_traj.poses)
+    N = len(xref_traj.poses) + int(3.0 / dt)
     time_axis = []
     xref_traj_series = np.zeros((FLAT_STATES, N))
     x_traj_series = np.zeros((FLAT_STATES, N))

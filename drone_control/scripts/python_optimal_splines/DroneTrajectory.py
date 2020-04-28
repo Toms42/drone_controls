@@ -6,7 +6,8 @@ from nav_msgs.msg import Path
 from geometry_msgs.msg import Point, Quaternion, Pose, PoseStamped
 from std_msgs.msg import Header
 import rospy
-from math import atan2, asin
+from math import atan2, asin, sqrt
+from scipy import linalg
 
 
 class DroneGate:
@@ -123,9 +124,14 @@ class DroneTrajectory:
         ts = np.arange(0, self.trajectory.end_time(), dt)
 
         poses = []
+        d = 0
+        last_pos = self.val(0)
         for t in ts:
             pos = self.val(t)
             vel = self.val(t, order=1)
+
+            d = d + sqrt(linalg.norm(np.array(pos) - np.array(last_pos)))
+            last_pos = pos
 
             pose = PoseStamped()
             pose.header.frame_id = frame
@@ -146,5 +152,7 @@ class DroneTrajectory:
         path.header.frame_id = frame
         path.header.stamp = start_time
         path.poses = poses
+
+        print("Total path length: {}m, time: {}s, average speed: {} m/s".format(d, self.trajectory.end_time(), d / self.trajectory.end_time()))
 
         return path

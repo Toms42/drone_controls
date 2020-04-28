@@ -69,7 +69,9 @@ def main():
     m = rospy.get_param("/uav/flightgoggles_uav_dynamics/vehicle_mass")
     g = 9.81
     # aggr = rospy.get_param("/splinegen/aggr")
-    aggr = 10
+
+    aggr = 10**4
+    T = 40.0 # T=None to use aggr instead.
 
     # Flat Dynamics
     FLAT_STATES = 7
@@ -80,7 +82,7 @@ def main():
     B[3:, :] = np.eye(4)
     Gff = np.array([[0, 0, g, 0]]).T  # gravity compensation
     Q = np.diag([10, 10, 20, 0.01, 0.01, 0.01, 10])
-    R = np.eye(FLAT_CTRLS) * 5
+    R = np.eye(FLAT_CTRLS) * 1
 
     # Trajectory generation
     # get gate poses
@@ -98,7 +100,7 @@ def main():
     drone_traj.set_end(position=x0[:3], velocity=x0[3:6])
     for (trans, rot) in gate_transforms.values():
         drone_traj.add_gate(trans, rot)
-    drone_traj.solve(aggr)
+    drone_traj.solve(aggr, T=T)
 
     # PID Controller for setting angular rates
     pid_phi = PID(Kp=7, Ki=0, Kd=1, setpoint=0)
@@ -115,7 +117,7 @@ def main():
     max_time = xref_traj.poses[-1].header.stamp.to_sec() - start_time
 
     # plotting
-    N = len(xref_traj.poses)
+    N = len(xref_traj.poses) + int(3.0 / dt)
     time_axis = []
     xref_traj_series = np.zeros((FLAT_STATES, N))
     x_traj_series = np.zeros((FLAT_STATES, N))
@@ -183,7 +185,9 @@ def main():
 
         u = -K*(x-xref) + Gff + ff
         # print("%.3f, %.3f, %.3f" % (ff[0][0], ff[1][0], ff[2][0]))
-        [thrustd, phid, thetad, psid] = inverse_dyn(rot, xref, u, m)
+        up = np.array(
+            np.ndarray.flatten(u).tolist()[0])
+        [thrustd, phid, thetad, psid] = inverse_dyn(rot, xref, up, m)
         # [psid, thetad, phid] = Rotation.from_quat(ori_g).as_euler('ZYX')
         phid_traj.append(phid)
         thetad_traj.append(thetad)
