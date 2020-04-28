@@ -90,8 +90,6 @@ class Environment(object):
         # Generate trajectory (starttime-sensitive)
         print("Generating optimal trajectory...")
         self.start_time = rospy.get_time()
-        self.xref_traj = self.drone_traj.as_path(dt=self.dt, frame='world', start_time=rospy.Time.now())
-        self.max_time = self.xref_traj.poses[-1].header.stamp.to_sec() - self.start_time
         self.xref = self.x0
         self.track_time = 0
         self.sim_running = True
@@ -174,14 +172,24 @@ class Environment(object):
         self.drone_traj = DroneTrajectory()
         self.drone_traj.set_start(position=self.x0[:3], velocity=self.x0[3:6])
         self.drone_traj.set_end(position=self.x0[:3], velocity=self.x0[3:6])
-        for (trans, rot) in self.gate_transforms.values():
-            self.drone_traj.add_gate(trans, rot)
+        for gate_id in self.gate_ids:
+            try:
+                (trans, rot) = self.gate_transforms[gate_id]
+                self.drone_traj.add_gate(trans, rot)
+            except KeyError:
+                print("Gate %d doesn't exist, skipping..." % gate_id)
+                continue
+                
         self.drone_traj.solve(self.aggr)
+        self.xref_traj = self.drone_traj.as_path(dt=self.dt, frame='world', start_time=rospy.Time.now())
+        self.max_time = self.xref_traj.poses[-1].header.stamp.to_sec() - rospy.get_time()
         
 
     def change_gate_ids(self, targets):
+        print("Setting new gate targets, solving new trajectory...")
         self.gate_ids = targets
-        self.gate_transforms = Environment.get_gate_positions(self.gate_ids)
+        self.gate_transforms = self.get_gate_positions()
+        self.generate_trajectory()
 
     def imu_cb(self, data):
         self.imu_data = data
@@ -302,3 +310,6 @@ def test():
                 action = expert.gen_action((trans, rot), xref, ff)
                 env.step(action)
                 env.rate.sleep()
+
+if __name__=='__main__':
+    test()
