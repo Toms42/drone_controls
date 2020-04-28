@@ -4,6 +4,9 @@ from scipy.spatial.transform import Rotation
 
 def inverse_dyn(q, x_ref, u, m):
     up = u[:3] # linear accelerations
+    up = np.array(
+        np.ndarray.flatten(up).tolist()[0])
+
     # thrust = float(m * np.linalg.norm(up))
     normal_measured = Rotation.from_quat(q).apply([0, 0, 1])
     thrust = np.dot(up, normal_measured)
